@@ -403,29 +403,31 @@ macro_rules! new_sampling_fn {
      // The structure to hold the options (and other fields).
      $(#[$doc: meta])* $struct: ident
     ) => {
-        $(#[$docfn])*
-        ///
-        /// Panics if `a == b` or they are not finite.
-        #[must_use]
-        pub fn $fun<F>(f: F, a: f64, b: f64) -> $struct<F>
-        where F: FnMut(f64) -> $ft {
-            if !a.is_finite() {
-                panic!("curve_sampling::{}: a = {} must be finite",
-                       stringify!($fun), a);
-            }
-            if !b.is_finite() {
-                panic!("curve_sampling::{}: b = {} must be finite",
-                       stringify!($fun), b);
-            }
-            if a == b {
-                panic!("curve_sampling::{}: a and b must not be equal",
-                       stringify!($fun));
-            }
-            $struct { f, a, b,  // Order of `a`, `b` reflect orientation
-                      n: 100,
-                      viewport: None,
-                      init: vec![],
-                      init_pt: vec![],
+        impl Sampling {
+            $(#[$docfn])*
+            ///
+            /// Panics if `a == b` or they are not finite.
+                #[must_use]
+            pub fn $fun<F>(f: F, a: f64, b: f64) -> $struct<F>
+            where F: FnMut(f64) -> $ft {
+                if !a.is_finite() {
+                    panic!("curve_sampling::{}: a = {} must be finite",
+                           stringify!($fun), a);
+                }
+                if !b.is_finite() {
+                    panic!("curve_sampling::{}: b = {} must be finite",
+                           stringify!($fun), b);
+                }
+                if a == b {
+                    panic!("curve_sampling::{}: a and b must not be equal",
+                           stringify!($fun));
+                }
+                $struct { f, a, b,  // Order of `a`, `b` reflect orientation
+                          n: 100,
+                          viewport: None,
+                          init: vec![],
+                          init_pt: vec![],
+                }
             }
         }
 
@@ -457,7 +459,7 @@ macro_rules! new_sampling_fn {
             }
 
             /// Add initial values of `t` such that `f(t)` (see [`
-            #[doc = stringify!($fun)]
+            #[doc = stringify!(Sampling::$fun)]
             /// `]) must be included into the sampling in addition to
             /// the `n` evaluations.  Only the values between `a` and
             /// `b` are taken into account (other values are ignored).
@@ -476,7 +478,7 @@ macro_rules! new_sampling_fn {
             /// allows you to use previous evaluations of `f`.  Only
             /// the couples with first coordinate `t` between `a` and
             /// `b` (see [`
-            #[doc = stringify!($fun)]
+            #[doc = stringify!(Sampling::$fun)]
             /// `]) are considered (other values are ignored).
             pub fn init_pt<'a, I>(mut self, pts: I) -> Self
             where I: IntoIterator<Item = &'a (f64, $ft)> {
@@ -499,7 +501,7 @@ new_sampling_fn!(
     /// Create a sampling for the graph of `f` on the interval
     /// \[`a`, `b`\] with evenly spaced values of the argument.
     uniform -> f64,
-    /// Uniform sampling options.  See [`uniform`].
+    /// Uniform sampling options.  See [`Sampling::uniform`].
     Uniform);
 
 macro_rules! uniform_sampling {
@@ -578,7 +580,7 @@ new_sampling_fn!(
     /// Create a sampling of the *graph* of `f` on the interval
     /// \[`a`, `b`\] by evaluating `f` at `n` points.
     fun -> f64,
-    /// Options for sampling a function ℝ → ℝ.  See [`fun`].
+    /// Options for sampling a function ℝ → ℝ.  See [`Sampling::fun`].
     Fun);
 
 impl<F> Fun<F>
@@ -620,7 +622,7 @@ new_sampling_fn!(
     /// Create a sampling of the *image* of `f` on the interval
     /// \[`a`, `b`\] by evaluating `f` at `n` points.
     param -> [f64; 2],
-    /// Options for sampling a function ℝ → ℝ.  See [`param`].
+    /// Options for sampling a function ℝ → ℝ.  See [`Sampling::param`].
     Param);
 
 impl<F> Param<F>
@@ -914,11 +916,11 @@ impl Display for Sampling {
 
 #[cfg(test)]
 mod tests {
-    use crate as cs;
+    use crate::{Sampling, BoundingBox};
 
-    fn xy_of_sampling(s: &cs::Sampling) -> Vec<Option<(f64, f64)>> {
+    fn xy_of_sampling(s: &Sampling) -> Vec<Option<(f64, f64)>> {
         s.path.iter().map(|p| {
-            use cs::CutOr::*;
+            use crate::CutOr::*;
             match p {
                 Pt(p) => Some((p.x, p.y)),
                 Undef {t: _} | Cut => None,
@@ -926,16 +928,16 @@ mod tests {
         }).collect()
     }
 
-    fn test_clip(bb: cs::BoundingBox,
+    fn test_clip(bb: BoundingBox,
                  path: Vec<[f64;2]>,
                  expected: Vec<Option<(f64,f64)>>) {
-        let s = cs::Sampling::from(path).clip(bb);
+        let s = Sampling::from(path).clip(bb);
         assert_eq!(xy_of_sampling(&s), expected);
     }
 
     #[test]
     fn clip_base () {
-        let bb = cs::BoundingBox { xmin: 0.,  xmax: 3., ymin: 0.,  ymax: 2.};
+        let bb = BoundingBox { xmin: 0.,  xmax: 3., ymin: 0.,  ymax: 2.};
         test_clip(bb, vec![[0.,1.], [2.,3.]],
                   vec![Some((0.,1.)), Some((1.,2.))]);
         test_clip(bb,
@@ -952,7 +954,7 @@ mod tests {
 
     #[test]
     fn clip_double_cut() {
-        let bb = cs::BoundingBox { xmin: 0.,  xmax: 4., ymin: 0.,  ymax: 2.};
+        let bb = BoundingBox { xmin: 0.,  xmax: 4., ymin: 0.,  ymax: 2.};
         test_clip(bb,
                   vec![[1., 2.], [2.,3.], [5.,0.], [-1., 0.] ],
                   vec![Some((1., 2.)), None,
@@ -962,7 +964,7 @@ mod tests {
 
     #[test]
     fn clip_almost_horiz() {
-        let bb = cs::BoundingBox { xmin: 0.,  xmax: 2., ymin: -1.,  ymax: 1.};
+        let bb = BoundingBox { xmin: 0.,  xmax: 2., ymin: -1.,  ymax: 1.};
         test_clip(bb,
                   vec![[1., 1e-100], [3., -1e-100] ],
                   vec![Some((1., 1e-100)), Some((2., 0.))]);
@@ -970,7 +972,7 @@ mod tests {
 
     #[test]
     fn uniform1() {
-        let s = cs::uniform(|x| x, 0., 4.).n(3)
+        let s = Sampling::uniform(|x| x, 0., 4.).n(3)
             .init(&[1.]).init_pt(&[(3., 0.)]).build();
         assert_eq!(xy_of_sampling(&s),
                    vec![Some((0.,0.)), Some((1.,1.)), Some((2.,2.)),
@@ -979,7 +981,7 @@ mod tests {
 
     #[test]
     fn uniform2() {
-        let s = cs::uniform(|x| (4. - x).sqrt(), 0., 6.).n(4).build();
+        let s = Sampling::uniform(|x| (4. - x).sqrt(), 0., 6.).n(4).build();
         assert_eq!(xy_of_sampling(&s),
                    vec![Some((0.,2.)), Some((2., 2f64.sqrt())),
                         Some((4., 0.)), None]);
