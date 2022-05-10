@@ -709,7 +709,9 @@ impl<'a> LaTeX<'a> {
         self
     }
 
-    /// Set the type of arrow to draw to `arrow`.  See the TikZ manual.
+    /// Set the type of arrow to draw to `arrow`.
+    /// See the documentation of `\pgfsetarrowsend` in the
+    /// [TikZ manual](https://tikz.dev/base-actions#sec-103.3).
     pub fn arrow(&mut self, arrow: &'a str) -> &mut Self {
         self.arrow = Some(arrow);
         self
@@ -719,6 +721,10 @@ impl<'a> LaTeX<'a> {
     /// the interval \[0.,1.\]).  If [`LaTeX::arrow`] is specified but
     /// not this, it defaults to `0.5`.
     pub fn arrow_pos(&mut self, arrow_pos: f64) -> &mut Self {
+        if ! arrow_pos.is_finite() {
+            panic!("curve_sampling::LaTeX::arrow_pos: \
+                    position must be finite");
+        }
         self.arrow_pos = Some(arrow_pos.clamp(0., 1.));
         self
     }
@@ -775,6 +781,7 @@ impl<'a> LaTeX<'a> {
                 cur_len = 0.;
             }
         }}
+        lens.push(arrow_pos * cur_len);
         if lens.is_empty() { return Ok(()) }
         let mut lens = lens.iter();
         let mut rem_len = *lens.next().unwrap(); // remaining before arrow
