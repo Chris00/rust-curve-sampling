@@ -1,0 +1,20 @@
+[package]
+name = "curve-sampling"
+version = "0.1.0"
+edition = "2021"
+authors = ["Christophe Troestler <christophe.troestler@umons.ac.be>"]
+description = "Adaptive sampling of parametric"
+# and implicit curves
+repository = "https://github.com/Chris00/rust-curve-sampling"
+documentation = "https://docs.rs/curve-sampling"
+license = "GPL-3.0-or-later"
+keywords = ["math", "sampling", "graphing", "plotting"]
+categories = ["mathematics", "science"]
+
+[dependencies]
+rand = "0.8.5"
+rgb = "0.8.32"
+
+[[example]]
+name = "latex_speed"
+path = "examples/latex_speed.rs"
