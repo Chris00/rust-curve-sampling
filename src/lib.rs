@@ -408,15 +408,17 @@ where T: IntoIterator<Item = [f64;2]> {
 /// function to generate it.
 macro_rules! new_sampling_fn {
     // Function to init the struct.
-    ($(#[$docfn: meta])* $fun: ident -> $ft: ty,
+    ($(#[$docfn: meta])*, $(#[$docfn_extra: meta])* $fun: ident -> $ft: ty,
      // The structure to hold the options (and other fields).
      $(#[$doc: meta])* $struct: ident
     ) => {
         impl Sampling {
             $(#[$docfn])*
             ///
-                #[must_use]
             /// Panics if `a` or `b` is not finite.
+            ///
+            $(#[$docfn_extra])*
+            #[must_use]
             pub fn $fun<F>(f: F, a: f64, b: f64) -> $struct<F>
             where F: FnMut(f64) -> $ft {
                 if !a.is_finite() {
@@ -505,6 +507,17 @@ macro_rules! new_sampling_fn {
 new_sampling_fn!(
     /// Create a sampling for the graph of `f` on the interval
     /// \[`a`, `b`\] with evenly spaced values of the argument.
+    ,
+    /// # Example
+    ///
+    /// ```
+    /// use std::fs::File;
+    /// use curve_sampling::Sampling;
+    /// # fn main() -> Result<(), Box<dyn std::error::Error>> {
+    /// let s = Sampling::uniform(|x| x.sin(), 0., 4.).build();
+    /// s.write(&mut File::create("target/uniform.dat")?)?;
+    /// # Ok(()) }
+    /// ```
     uniform -> f64,
     /// Uniform sampling options.  See [`Sampling::uniform`].
     Uniform);
@@ -592,6 +605,17 @@ where F: FnMut(f64) -> f64 {
 new_sampling_fn!(
     /// Create a sampling of the *graph* of `f` on the interval
     /// \[`a`, `b`\] by evaluating `f` at `n` points.
+    ,
+    /// # Example
+    ///
+    /// ```
+    /// use std::fs::File;
+    /// use curve_sampling::Sampling;
+    /// # fn main() -> Result<(), Box<dyn std::error::Error>> {
+    /// let s = Sampling::fun(|x| x.sin(), 0., 4.).build();
+    /// s.write(&mut File::create("target/fun.dat")?)?;
+    /// # Ok(()) }
+    /// ```
     fun -> f64,
     /// Options for sampling a function ℝ → ℝ.  See [`Sampling::fun`].
     Fun);
@@ -642,6 +666,17 @@ where F: FnMut(f64) -> f64 {
 new_sampling_fn!(
     /// Create a sampling of the *image* of `f` on the interval
     /// \[`a`, `b`\] by evaluating `f` at `n` points.
+    ,
+    /// # Example
+    ///
+    /// ```
+    /// use std::fs::File;
+    /// use curve_sampling::Sampling;
+    /// # fn main() -> Result<(), Box<dyn std::error::Error>> {
+    /// let s = Sampling::param(|t| [t.sin(), t.cos()], 0., 4.).build();
+    /// s.write(&mut File::create("target/param.dat")?)?;
+    /// # Ok(()) }
+    /// ```
     param -> [f64; 2],
     /// Options for sampling a function ℝ → ℝ.  See [`Sampling::param`].
     Param);
