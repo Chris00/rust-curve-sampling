@@ -131,9 +131,18 @@ enum Intersection {
 
 impl Sampling {
     /// Create an empty sampling.
-    fn new() -> Self {
+    #[inline]
+    fn empty() -> Self {
         Self { pq: BinaryHeap::new(),
                path: Vec::new(),
+               vp: None }
+    }
+
+    #[inline]
+    fn singleton(t: f64, x: f64, y: f64) -> Self {
+        let p = Point { t, x, y, cost: 0. };
+        Self { pq: BinaryHeap::new(),
+               path: vec![CutOr::Pt(p)],
                vp: None }
     }
 
@@ -273,7 +282,7 @@ impl Sampling {
         if bb.is_empty() {
             panic!("curve_sampling::clip: box with empty interior {:?}", bb)
         }
-        if self.is_empty() { return Self::new() };
+        if self.is_empty() { return Self::empty() };
         let mut path = Vec::with_capacity(self.path.len());
         let mut p0_opt = Cut;
         let mut p0_inside = false;
@@ -406,8 +415,8 @@ macro_rules! new_sampling_fn {
         impl Sampling {
             $(#[$docfn])*
             ///
-            /// Panics if `a == b` or they are not finite.
                 #[must_use]
+            /// Panics if `a` or `b` is not finite.
             pub fn $fun<F>(f: F, a: f64, b: f64) -> $struct<F>
             where F: FnMut(f64) -> $ft {
                 if !a.is_finite() {
@@ -417,10 +426,6 @@ macro_rules! new_sampling_fn {
                 if !b.is_finite() {
                     panic!("curve_sampling::{}: b = {} must be finite",
                            stringify!($fun), b);
-                }
-                if a == b {
-                    panic!("curve_sampling::{}: a and b must not be equal",
-                           stringify!($fun));
                 }
                 $struct { f, a, b,  // Order of `a`, `b` reflect orientation
                           n: 100,
@@ -557,6 +562,14 @@ macro_rules! y_is_valid { ($p: expr) => { $p.y.is_finite() } }
 impl<F> Uniform<F>
 where F: FnMut(f64) -> f64 {
     pub fn build(&mut self) -> Sampling {
+        if self.a == self.b {
+            let y = (self.f)(self.a); // `a` is finite by previous tests
+            if y.is_finite() {
+                return Sampling::singleton(self.a, self.a, y);
+            } else {
+                return Sampling::empty()
+            }
+        }
         macro_rules! f { ($t: expr) => {{
             Point { t: $t, x: $t, y: (self.f)($t), cost: 0. }
         }} }
@@ -610,6 +623,14 @@ where F: FnMut(f64) -> f64 {
 
     /// Return the sampling.
     pub fn build(&mut self) -> Sampling {
+        if self.a == self.b {
+            let y = (self.f)(self.a);
+            if y.is_finite() {
+                return Sampling::singleton(self.a, self.a, y);
+            } else {
+                return Sampling::empty()
+            }
+        }
         let n0 = (self.n / 10).min(10);
         let s = self.almost_uniform(n0);
 
@@ -655,6 +676,14 @@ where F: FnMut(f64) -> [f64; 2] {
 
     /// Return the sampling.
     pub fn build(&mut self) -> Sampling {
+        if self.a == self.b {
+            let [x, y] = (self.f)(self.a);
+            if x.is_finite() && y.is_finite() {
+                return Sampling::singleton(self.a, x , y);
+            } else {
+                return Sampling::empty()
+            }
+        }
         let n0 = (self.n / 10).min(10);
         let s = self.almost_uniform(n0);
 
