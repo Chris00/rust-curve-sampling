@@ -712,12 +712,14 @@ where F: FnMut(f64) -> f64 {
                 return Sampling::empty()
             }
         }
-        macro_rules! f { ($t: expr) => {{
+        macro_rules! f { ($t: ident) => {
             Point { t: $t, x: $t, y: (self.f)($t), cost: 0. }
-        }} }
+        } }
         let dt = (self.b - self.a) / (self.n - 1) as f64;
         macro_rules! push_eval { ($path: ident) => {
-            for i in 0 .. self.n { $path.push(f!(self.a + i as f64 * dt)); }
+            for i in 0 .. self.n {
+                let t = self.a + i as f64 * dt;
+                $path.push(f!(t)); }
         } }
         uniform_sampling!{self, f, pt_of_couple, push_eval, y_is_valid}
     }
@@ -752,9 +754,10 @@ new_sampling_fn!(
 impl<F> Fun<F>
 where F: FnMut(f64) -> f64 {
     fn almost_uniform(&mut self, n: usize) -> Sampling {
-        macro_rules! f { ($t: expr) => {
-            Point { t: $t, x: $t, y: (self.f)($t), cost: 0. }
-        } }
+        macro_rules! f { ($t: expr) => {{
+            let t = $t;
+            Point { t, x: t, y: (self.f)(t), cost: 0. }
+        }} }
         macro_rules! pt { ($p: expr) => {{
             let (x, y) = $p;
             Point { t: x, x, y, cost: 0. }
@@ -814,8 +817,9 @@ impl<F> Param<F>
 where F: FnMut(f64) -> [f64; 2] {
     fn almost_uniform(&mut self, n: usize) -> Sampling {
         macro_rules! f { ($t: expr) => {{
-            let [x, y] = (self.f)($t);
-            Point { t: $t, x, y, cost: 0. }
+            let t = $t;
+            let [x, y] = (self.f)(t);
+            Point { t, x, y, cost: 0. }
         }}}
         macro_rules! pt { ($p: expr) => {{
             let (t, [x,y]) = $p;
