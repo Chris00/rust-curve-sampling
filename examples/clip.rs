@@ -4,7 +4,7 @@ use std::{error::Error,
 use curve_sampling as cs;
 
 fn main() -> Result<(), Box<dyn Error>> {
-    let s = cs::Sampling::from(
+    let s = cs::Sampling::from_iter(
         [[0., -0.5], [1.5, 1.], [0.2, 0.5], [0.3, 1.5], [1., 0.6],
          [NAN, NAN], [-0.5, 0.5], [-1., 0.], [0.5, 0.5]]);
     s.write(&mut File::create("/tmp/clip0.dat")?)?;

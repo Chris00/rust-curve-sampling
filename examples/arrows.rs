@@ -6,8 +6,8 @@ use std::{error::Error,
 use curve_sampling::Sampling;
 
 fn main() -> Result<(), Box<dyn Error>> {
-    let s = Sampling::from([[0., 0.], [1., 1.], [NAN, NAN],
-                                [1., 1.], [3., -1.]]);
+    let s = Sampling::from_iter([[0., 0.], [1., 1.], [NAN, NAN],
+                                 [1., 1.], [3., -1.]]);
     s.latex().arrow_pos(0.3).write(&mut File::create("/tmp/arrow0.tex")?)?;
 
     let s = Sampling::uniform(|x| -0.7 * (x - 1.).powi(2), 0., 2.5).build();
