@@ -285,9 +285,13 @@ impl Sampling {
         IterPoints { next: self.head,  marker: PhantomData }
     }
 
-    /// Iterate on points indices (one output per point).
-    pub(crate) fn iter_points_mut(&self) -> IterPointsMut<'_> {
-        IterPointsMut { next: self.head,  marker: PhantomData }
+    /// Iterate on points indices (one output per point).  Also
+    /// returns the priority queue as we may want to mutate it using
+    /// this iterator (which prevents `self.vp` to be borrowed).
+    pub(crate) fn iter_points_mut(&mut self) -> (IterPointsMut<'_>,
+                                                &mut PQ<*mut Point>) {
+        (IterPointsMut { next: self.head,  marker: PhantomData },
+         &mut self.pq)
     }
 
     /// Iterate on the points (and cuts) of the path.  More
@@ -813,9 +817,138 @@ where F: FnMut(f64) -> f64 {
 //
 // Cost
 
+mod cost {
+    use super::{Point, Sampling};
+
+    // The cost of a point is a measure of the curvature at this
+    // point.  This requires segments before and after the point.  In
+    // case the point is a cut, or first, or last, it has a cost of 0.
+    // If it is an endpoint of a segment with the other point a cut,
+    // the cost is set to [`HANGING_NODE`] because the segment with
+    // the invalid point needs to be cut of too long to better
+    // determine the boundary.
+    //
+    // The cost of a point is apportioned to the segments of which it is
+    // an endpoint according to their relative lengths.  More precisely,
+    // the cost c of a point p is distributed on the segments s1 and s2
+    // (of respective lengths l1 and l2) it is an endpoint of as
+    //
+    //   c * l1/(l1+l2) for s1 and c * l2/(l1+l2) for s2.
+    //
+    // In order to be able to update the cost of s1 without accessing
+    // s2, p.cost holds c/(l1+l2).
+
+    /// Cost for new "hanging" nodes — nodes created splitting a
+    /// segment with an invalid endpoint.  Note that this cost will be
+    /// multiplied by a function of `dt` in `segment` so it must be
+    /// set high enough to ensure proper resolution of the endpoints
+    /// of the domain.
+    const HANGING_NODE: f64 = 5e5;
+
+    /// Return the cost of the middle point `pm`.
+    #[inline]
+    fn estimate(p0: &Point, pm: &Point, p1: &Point,
+                len_x: f64, len_y: f64) -> f64 {
+        let dx0m = (p0.x - pm.x) / len_x;
+        let dy0m = (p0.y - pm.y) / len_y;
+        let dx1m = (p1.x - pm.x) / len_x;
+        let dy1m = (p1.y - pm.y) / len_y;
+        let len0m = dx0m.hypot(dy0m);
+        let len1m = dx1m.hypot(dy1m);
+        if len0m == 0. || len1m == 0. {
+            f64::NEG_INFINITY // Do not subdivide
+        } else {
+            let dx = - dx0m * dx1m - dy0m * dy1m;
+            let dy = dy0m * dx1m - dx0m * dy1m;
+            dy.atan2(dx) // ∈ [-π, π]
+        }
+    }
+
+    /// Compute the cost of a segment according to the costs of its
+    /// endpoints.  `len_t` is the length of total range of time.
+    /// `len_x` and `len_y` are the dimensions of the bounding box.
+    #[inline]
+    fn segment(p0: &Point, p1: &Point,
+               len_t: f64, len_x: f64, len_y: f64) -> f64 {
+        let dt = (p1.t - p0.t) / len_t; // ∈ [0,1]
+        debug_assert!(dt >= 0. && dt <= 1.);
+        // Put less efforts when `dt` is small.  For functions, the
+        // Y-variation may be large but, if it happens for a small range
+        // of `t`, there is no point in adding indistinguishable details.
+        let dx = ((p1.x - p0.x) / len_x).abs();
+        let dy = ((p1.y - p0.y) / len_y).abs();
+        let mut cost = p0.cost.abs() + p1.cost.abs();
+        if p0.cost * p1.cost < 0. {
+            // zigzag are bad on a large scale but less important on a
+            // small scale.
+            if dx <= 0.01 && dy <= 0.01 { cost *= 0.5 }
+            else if !(dx <= 0.05 && dy <= 0.05) { cost *= 8. }
+        }
+        if dt >= 0.8 { cost }
+        else {
+            let dt = dt / 0.8;
+            dt * dt * (6. + (-8. + 3. * dt) * dt) * cost
+        }
+    }
+
+    /// Update the cost of all points in the sampling and add segments
+    /// to the priority queue.
+    pub(crate) fn compute(s: &mut Sampling, in_vp: impl Fn(&Point) -> bool) {
+        if let Some((len_t, len_x, len_y)) = s.len_txy() {
+            // Path is not empty.
+            let (mut pts, pq) = s.iter_points_mut();
+            let mut p0 = pts.next().unwrap();
+            p0.cost = 0.;
+            let mut p0_in_vp = p0.is_valid() && in_vp(p0);
+            let mut pm = match pts.next() {
+                Some(p) => p,
+                None => return };
+            for p1 in pts {
+                let pm_in_vp;
+                if pm.is_valid() {
+                    pm_in_vp = in_vp(pm);
+                    if p0.is_valid() && p1.is_valid() {
+                        pm.cost = estimate(p0, pm, p1, len_x, len_y);
+                    } else {
+                        pm.cost = HANGING_NODE;
+                    }
+                } else { // pm is the location of a cut
+                    pm_in_vp = false;
+                    pm.cost = 0.;
+                }
+                let cost_segment;
+                if p0_in_vp || pm_in_vp {
+                    // Segment [p0, pm]
+                    cost_segment = segment(p0, pm, len_t, len_x, len_y);
+                } else {
+                    cost_segment = f64::NEG_INFINITY;
+                }
+                // The segment is referred to by its first point.
+                pq.push(cost_segment, p0 as *mut _);
+                p0 = pm;
+                p0_in_vp = pm_in_vp;
+                pm = p1;
+            }
+            pm.cost = 0.; // last point
+            let cost_segment;
+            if p0_in_vp || in_vp(pm) {
+                cost_segment = segment(p0, pm, len_t, len_x, len_y);
+            } else {
+                cost_segment = f64::NEG_INFINITY;
+            }
+            pq.push(cost_segment, p0 as *mut _);
+        }
+    }
+}
+
 ////////////////////////////////////////////////////////////////////////
 //
 // Function sampling
+
+fn refine_gen(s: &mut Sampling, n: usize,
+              in_vp: impl Fn(&Point) -> bool) {
+
+}
 
 new_sampling_fn!(
     /// Create a sampling of the *graph* of `f` on the interval
@@ -868,8 +1001,18 @@ where F: FnMut(f64) -> f64 {
             }
         }
         let n0 = (self.n / 10).min(10);
-        let s = self.almost_uniform(n0);
-
+        let mut s = self.almost_uniform(n0);
+        match self.viewport {
+            Some(vp) => {
+                let in_vp = |p: &Point| vp.contains(p);
+                cost::compute(&mut s, in_vp);
+                refine_gen(&mut s, self.n - n0, in_vp)
+            }
+            None => {
+                cost::compute(&mut s, |_| true);
+                refine_gen(&mut s, self.n - n0, |_| true)
+            }
+        }
         s
     }
 }
@@ -934,8 +1077,18 @@ where F: FnMut(f64) -> [f64; 2] {
             }
         }
         let n0 = (self.n / 10).min(10);
-        let s = self.almost_uniform(n0);
-
+        let mut s = self.almost_uniform(n0);
+        match self.viewport {
+            Some(vp) => {
+                let in_vp = |p: &Point| vp.contains(p);
+                cost::compute(&mut s, in_vp);
+                refine_gen(&mut s, self.n - n0, in_vp);
+            }
+            None => {
+                cost::compute(&mut s, |_| true);
+                refine_gen(&mut s, self.n - n0, |_| true);
+            }
+        }
         s
     }
 }
