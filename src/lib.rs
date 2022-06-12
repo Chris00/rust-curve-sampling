@@ -589,35 +589,44 @@ impl Sampling {
         s.set_vp(bb);
         s
     }
-}
 
-impl FromIterator<[f64; 2]> for Sampling {
-    /// Return an sampling from the points.  Points with non-finite
-    /// coordinates are interpreted as cuts.
-    fn from_iter<T>(points: T) -> Self
-    where T: IntoIterator<Item = [f64; 2]>{
+    fn from_point_iterator<P>(points: P) -> Self
+    where P: IntoIterator<Item = Point> {
         let mut xmin = f64::INFINITY;
         let mut xmax = f64::NEG_INFINITY;
         let mut ymin = f64::INFINITY;
         let mut ymax = f64::NEG_INFINITY;
         let mut prev_is_cut = true;
         let mut s = Sampling::empty();
-        for (i, [x, y]) in points.into_iter().enumerate() {
-            let t = i as f64;
-            if x.is_finite() && y.is_finite() {
-                if x < xmin { xmin = x }
-                if x > xmax { xmax = x }
-                if y < ymin { ymin = y }
-                if y > ymax { ymax = y }
-                s.push_unchecked(Point::new(t, x, y));
+        for p in points.into_iter() {
+            if p.is_valid() {
+                if p.x < xmin { xmin = p.x }
+                if p.x > xmax { xmax = p.x }
+                if p.y < ymin { ymin = p.y }
+                if p.y > ymax { ymax = p.y }
+                s.push_unchecked(p);
                 prev_is_cut = false;
             } else if ! prev_is_cut {
-                s.push_unchecked(Point::cut(t));
+                s.push_unchecked(Point::cut(p.t));
                 prev_is_cut = true;
             }
         }
         s.set_vp(BoundingBox { xmin, xmax, ymin, ymax });
         s
+    }
+}
+
+
+impl FromIterator<[f64; 2]> for Sampling {
+    /// Return an sampling from the points.  Points with non-finite
+    /// coordinates are interpreted as cuts.
+    fn from_iter<T>(points: T) -> Self
+    where T: IntoIterator<Item = [f64; 2]> {
+        Sampling::from_point_iterator(
+            points.into_iter().enumerate().map(|(i, [x, y])| {
+                let t = i as f64;
+                if x.is_finite() {Point::new(t, x, y)}
+                else {Point::cut(t)} }))
     }
 }
 
@@ -748,10 +757,6 @@ macro_rules! uniform_sampling {
     // (so they are finite).
     ($self: ident, $point_of_f: ident, $point_of_pt: ident,
      $push_eval: ident, $n: expr) => {
-        let mut xmin = f64::INFINITY;
-        let mut xmax = f64::NEG_INFINITY;
-        let mut ymin = f64::INFINITY;
-        let mut ymax = f64::NEG_INFINITY;
         let mut points = Vec::with_capacity(
             $self.init.len() + $self.init_pt.len() + $n);
         // `t` ∈ \[`a`, `b`\] already checked by [`init`] and [`init_pt`].
@@ -766,24 +771,7 @@ macro_rules! uniform_sampling {
             points.sort_unstable_by(|p1, p2| {
                 p2.t.partial_cmp(&p1.t).unwrap() });
         }
-        let mut s = Sampling::empty();
-        let mut prev_is_cut = false;
-        for p in points.into_iter() {
-            if p.is_valid() {
-                if p.x < xmin { xmin = p.x }
-                if p.x > xmax { xmax = p.x }
-                if p.y < ymin { ymin = p.y }
-                if p.y > ymax { ymax = p.y }
-                s.push_unchecked(p);
-                prev_is_cut = false;
-            } else if ! prev_is_cut {
-                s.push_unchecked(Point::cut(p.t));
-                prev_is_cut = true;
-            }
-        }
-        //remove_trailing_cuts(&mut path);
-        s.set_vp(BoundingBox { xmin, xmax, ymin, ymax });
-        s
+        Sampling::from_point_iterator(points)
     }
 }
 
