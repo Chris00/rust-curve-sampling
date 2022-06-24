@@ -434,6 +434,15 @@ impl Sampling {
         }
     }
 
+    /// Transpose in place the x and y coordinates of the sampling.
+    pub fn transpose(&mut self) -> &mut Self {
+        let (iter, _) = self.iter_points_mut();
+        for p in iter {
+            swap(&mut p.x, &mut p.y)
+        }
+        self
+    }
+
     /// Assume `p0` ∉ `bb` and `p1` ∉ `bb` (thus, not even on the
     /// boundary of `bb`) and `p0` ≠ `p1`.  Return the endpoints of
     /// the segment intersecting the boundary of `bb` if any.  The
