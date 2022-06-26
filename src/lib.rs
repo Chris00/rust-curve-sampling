@@ -195,6 +195,13 @@ impl Drop for Sampling {
     }
 }
 
+#[derive(Debug, Clone, Copy)]
+struct Lengths {
+    t: f64,
+    x: f64,
+    y: f64,
+}
+
 impl Sampling {
     /// Return `true` if the sampling contains no point.
     pub fn is_empty(&self) -> bool { self.head.is_null() }
@@ -263,7 +270,7 @@ impl Sampling {
 
     /// Return the length of the "time interval" as well as the
     /// lengths of the viewport.
-    pub(crate) fn len_txy(&self) -> Option<(f64, f64, f64)> {
+    pub(crate) fn len_txy(&self) -> Option<Lengths> {
         if self.is_empty() { return None }
         let p0 = unsafe { &*self.head as &Point };
         let p1 = unsafe { &*self.tail as &Point };
@@ -279,7 +286,7 @@ impl Sampling {
                 len_y = 1.;
             }
         }
-        Some(((p1.t - p0.t).abs(), len_x, len_y))
+        Some(Lengths { t: (p1.t - p0.t).abs(), x: len_x, y: len_y })
     }
 
     /// Iterate on points indices (one output per point).
@@ -873,7 +880,7 @@ where F: FnMut(f64) -> f64 {
 // Cost
 
 mod cost {
-    use super::{Point, Sampling};
+    use super::{Point, Sampling, Lengths};
 
     // The cost of a point is a measure of the curvature at this
     // point.  This requires segments before and after the point.  In
@@ -900,14 +907,15 @@ mod cost {
     /// of the domain.
     const HANGING_NODE: f64 = 5e5;
 
-    /// Return the cost of the middle point `pm`.
+    /// Return the cost of the middle point `pm`.  Assumes `p0` and
+    /// `p1` are valid points.
     #[inline]
-    fn estimate(p0: &Point, pm: &Point, p1: &Point,
-                len_x: f64, len_y: f64) -> f64 {
-        let dx0m = (p0.x - pm.x) / len_x;
-        let dy0m = (p0.y - pm.y) / len_y;
-        let dx1m = (p1.x - pm.x) / len_x;
-        let dy1m = (p1.y - pm.y) / len_y;
+    pub(crate) fn estimate(p0: &Point, pm: &Point, p1: &Point,
+                           len: Lengths) -> f64 {
+        let dx0m = (p0.x - pm.x) / len.x;
+        let dy0m = (p0.y - pm.y) / len.y;
+        let dx1m = (p1.x - pm.x) / len.x;
+        let dy1m = (p1.y - pm.y) / len.y;
         let len0m = dx0m.hypot(dy0m);
         let len1m = dx1m.hypot(dy1m);
         if len0m == 0. || len1m == 0. {
@@ -919,19 +927,25 @@ mod cost {
         }
     }
 
+    #[inline]
+    pub(crate) fn segment_vp(p0: &Point, p1: &Point, len: Lengths,
+                          in_vp: bool) -> f64 {
+        if ! in_vp { return f64::NEG_INFINITY }
+        segment(p0, p1, len)
+    }
+
     /// Compute the cost of a segment according to the costs of its
     /// endpoints.  `len_t` is the length of total range of time.
     /// `len_x` and `len_y` are the dimensions of the bounding box.
     #[inline]
-    fn segment(p0: &Point, p1: &Point,
-               len_t: f64, len_x: f64, len_y: f64) -> f64 {
-        let dt = (p1.t - p0.t) / len_t; // ∈ [0,1]
+    pub(crate) fn segment(p0: &Point, p1: &Point, len: Lengths) -> f64 {
+        let dt = (p1.t - p0.t) / len.t; // ∈ [0,1]
         debug_assert!(dt >= 0. && dt <= 1.);
         // Put less efforts when `dt` is small.  For functions, the
         // Y-variation may be large but, if it happens for a small range
         // of `t`, there is no point in adding indistinguishable details.
-        let dx = ((p1.x - p0.x) / len_x).abs();
-        let dy = ((p1.y - p0.y) / len_y).abs();
+        let dx = ((p1.x - p0.x) / len.x).abs();
+        let dy = ((p1.y - p0.y) / len.y).abs();
         let mut cost = p0.cost.abs() + p1.cost.abs();
         if p0.cost * p1.cost < 0. {
             // zigzag are bad on a large scale but less important on a
@@ -949,7 +963,7 @@ mod cost {
     /// Update the cost of all points in the sampling and add segments
     /// to the priority queue.
     pub(crate) fn compute(s: &mut Sampling, in_vp: impl Fn(&Point) -> bool) {
-        if let Some((len_t, len_x, len_y)) = s.len_txy() {
+        if let Some(len) = s.len_txy() {
             // Path is not empty.
             let (mut pts, pq) = s.iter_points_mut();
             let mut p0 = pts.next().unwrap();
@@ -963,7 +977,7 @@ mod cost {
                 if pm.is_valid() {
                     pm_in_vp = in_vp(pm);
                     if p0.is_valid() && p1.is_valid() {
-                        pm.cost = estimate(p0, pm, p1, len_x, len_y);
+                        pm.cost = estimate(p0, pm, p1, len);
                     } else {
                         pm.cost = HANGING_NODE;
                     }
@@ -972,12 +986,9 @@ mod cost {
                     pm.cost = 0.;
                 }
                 let cost_segment;
-                if p0_in_vp || pm_in_vp {
-                    // Segment [p0, pm]
-                    cost_segment = segment(p0, pm, len_t, len_x, len_y);
-                } else {
-                    cost_segment = f64::NEG_INFINITY;
-                }
+                // Segment [p0, pm]
+                cost_segment = segment_vp(p0, pm, len,
+                                          p0_in_vp || pm_in_vp);
                 // The segment is referred to by its first point.
                 pq.push(cost_segment, p0 as *mut _);
                 p0 = pm;
@@ -986,11 +997,8 @@ mod cost {
             }
             pm.cost = 0.; // last point
             let cost_segment;
-            if p0_in_vp || in_vp(pm) {
-                cost_segment = segment(p0, pm, len_t, len_x, len_y);
-            } else {
-                cost_segment = f64::NEG_INFINITY;
-            }
+            cost_segment = segment_vp(p0, pm, len,
+                                      p0_in_vp || in_vp(pm));
             pq.push(cost_segment, p0 as *mut _);
         }
     }
