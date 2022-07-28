@@ -89,7 +89,7 @@ use priority_queue::PQ;
 // Bounding box
 
 /// A box \[`xmin`, `xmax`\] × \[`ymin`, `ymax`\].
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, PartialEq)]
 pub struct BoundingBox {
     pub xmin: f64,
     pub xmax: f64,
@@ -409,9 +409,9 @@ impl Sampling {
             match p_opt {
                 Some([x, y]) => {
                     if x < bb.xmin { bb.xmin = x }
-                    else if bb.xmax < x { bb.xmax = x };
+                    if bb.xmax < x { bb.xmax = x };
                     if y < bb.ymin { bb.ymin = y }
-                    else if bb.ymax < y { bb.ymax = y };
+                    if bb.ymax < y { bb.ymax = y };
                 }
                 None => ()
             }
@@ -1364,7 +1364,7 @@ impl Display for Sampling {
 
 #[cfg(test)]
 mod tests {
-    use crate::{Sampling, BoundingBox};
+    use crate::{Sampling, BoundingBox, Point};
 
     fn xy_of_sampling(s: &Sampling) -> Vec<Option<(f64, f64)>> {
         s.iter().map(|p| p.map(|p| (p[0], p[1]))).collect()
@@ -1378,6 +1378,13 @@ mod tests {
                                      [2.,2.]]);
         assert_eq!(xy_of_sampling(&s),
                    vec![Some((0.,0.)), Some((1.,1.)), None, Some((2.,2.))]);
+    }
+
+    #[test]
+    fn bounding_box_singleton() {
+        let s = Sampling::singleton(Point::new(0., 1., 2.));
+        let bb = BoundingBox {xmin: 1., xmax: 1., ymin: 2., ymax: 2.};
+        assert_eq!(s.bounding_box(), bb);
     }
 
     fn test_clip(bb: BoundingBox,
