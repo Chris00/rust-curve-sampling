@@ -169,10 +169,7 @@ impl Point {
                 next: ptr::null_mut() }
     }
 
-    /// For points at boundaries of [`sampling::SubPath`], indicate
-    /// that it is a "real" point as opposed to points where the
-    /// function is not defined for which only `t`, the argument of
-    /// the function, must be finite (and `y` not).
+    /// Return `true` if the point is valid — otherwise it is a cut.
     #[inline]
     fn is_valid(&self) -> bool { self.y.is_finite() }
 }
@@ -210,6 +207,7 @@ struct Lengths {
 
 impl Sampling {
     /// Return `true` if the sampling contains no point.
+    #[inline]
     pub fn is_empty(&self) -> bool { self.head.is_null() }
 
     /// Create an empty sampling.
@@ -224,6 +222,7 @@ impl Sampling {
     #[inline]
     pub(crate) fn singleton(mut p: Point) -> Self {
         debug_assert!(p.t.is_finite() && p.x.is_finite() && p.y.is_finite());
+        // `p` may be obtained cloning some other point.  Sanitize it.
         p.prev = ptr::null_mut();
         p.next = ptr::null_mut();
         let pt = Box::into_raw(Box::new(p));
@@ -233,12 +232,14 @@ impl Sampling {
                vp: None }
     }
 
-    /// Push a new point to the sampling (which the sampling then
+    /// Push a new point at the end of the sampling (which the sampling then
     /// owns).  Does not modify the priority queue.  Does not verify
-    /// that at most 2 cuts can follow each other.
+    /// that at most 2 cuts can follow each other or that `p.y` is
+    /// finite ⇒ `p.x` is finite.
     #[inline]
     pub(crate) fn push_unchecked(&mut self, mut p: Point) {
-        if self.head.is_null() {
+        debug_assert!(!p.y.is_finite() || p.x.is_finite());
+        if self.is_empty() {
             // `p` may be obtained cloning some other point.  Sanitize it.
             p.prev = ptr::null_mut();
             p.next = ptr::null_mut();
@@ -267,11 +268,6 @@ impl Sampling {
     #[inline]
     pub(crate) fn set_vp(&mut self, bb: BoundingBox) {
         self.vp = Some(bb);
-    }
-
-    #[inline]
-    pub(crate) fn vp(&self) -> Option<BoundingBox> {
-        self.vp
     }
 
     /// Return the length of the "time interval" as well as the
@@ -438,7 +434,7 @@ impl Sampling {
         let mut t = 1.; // t ∈ [0, 1]
         let dx = p1.x - p0.x; // May be 0.
         let r = (if dx >= 0. {bb.xmax} else {bb.xmin} - p0.x) / dx;
-        if r < t { t = r }
+        if r < t { t = r } // ⟹ r finite (as r ≥ 0 or NaN)
         let dy = p1.y - p0.y; // May be 0.
         let r = (if dy >= 0. {bb.ymax} else {bb.ymin} - p0.y) / dy;
         if r < t { t = r };
@@ -521,10 +517,9 @@ impl Sampling {
     /// box will be removed.)
     #[must_use]
     pub fn clip(&self, bb: BoundingBox) -> Self {
-        if bb.is_empty() {
-            panic!("curve_sampling::clip: box with empty interior {:?}", bb)
+        if bb.is_empty() || self.is_empty() {
+            return Sampling::empty();
         }
-        if self.is_empty() { return Sampling::empty() };
         let mut s = Sampling::empty();
         let mut p0_opt: Option<&Point> = None;
         let mut p0_inside = false;
