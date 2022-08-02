@@ -98,6 +98,12 @@ pub struct BoundingBox {
 }
 
 impl BoundingBox {
+    #[inline]
+    pub(crate) fn empty() -> Self {
+        Self { xmin: f64::INFINITY,  xmax: f64::NEG_INFINITY,
+               ymin: f64::INFINITY,  ymax: f64::NEG_INFINITY }
+    }
+
     /// Return `true` if the bounding box has a non-empty interior.
     #[inline]
     pub fn is_empty(&self) -> bool {
@@ -402,16 +408,20 @@ impl Sampling {
     /// sampling `self`.  If the path is empty, the "min" fields of
     /// the bounding box are set to +∞ and "max" fields to -∞.
     pub fn bounding_box(&self) -> BoundingBox {
-        let mut bb = BoundingBox {
-            xmin: f64::INFINITY,  xmax: f64::NEG_INFINITY,
-            ymin: f64::INFINITY,  ymax: f64::NEG_INFINITY };
-        for p_opt in self.iter() {
+        let mut points = self.iter().skip_while(|p| p.is_none());
+        let mut bb = match &points.next() {
+            Some(Some([x, y])) => BoundingBox { xmin: *x,  xmax: *x,
+                                               ymin: *y,  ymax: *y },
+            Some(None) => unreachable!(),
+            None => return BoundingBox::empty()
+        };
+        for p_opt in points {
             match p_opt {
                 Some([x, y]) => {
                     if x < bb.xmin { bb.xmin = x }
-                    if bb.xmax < x { bb.xmax = x };
+                    else if bb.xmax < x { bb.xmax = x };
                     if y < bb.ymin { bb.ymin = y }
-                    if bb.ymax < y { bb.ymax = y };
+                    else if bb.ymax < y { bb.ymax = y };
                 }
                 None => ()
             }
