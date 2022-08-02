@@ -425,6 +425,15 @@ impl Sampling {
         bb
     }
 
+    /// Transpose in place the x and y coordinates of the sampling.
+    pub fn transpose(&mut self) -> &mut Self {
+        let (iter, _) = self.iter_points_mut();
+        for p in iter {
+            swap(&mut p.x, &mut p.y)
+        }
+        self
+    }
+
     /// Assume `p0` ∈ `bb` and `p1` ∉ `bb`.  Return the point
     /// intersecting the boundary of `bb`.  If the intersection point
     /// is the same as `p0`, return `None`
@@ -445,15 +454,6 @@ impl Sampling {
                             p0.x + t * dx,
                             p0.y + t * dy))
         }
-    }
-
-    /// Transpose in place the x and y coordinates of the sampling.
-    pub fn transpose(&mut self) -> &mut Self {
-        let (iter, _) = self.iter_points_mut();
-        for p in iter {
-            swap(&mut p.x, &mut p.y)
-        }
-        self
     }
 
     /// Assume `p0` ∉ `bb` and `p1` ∉ `bb` (thus, not even on the
