@@ -517,9 +517,6 @@ impl Sampling {
     /// box will be removed.)
     #[must_use]
     pub fn clip(&self, bb: BoundingBox) -> Self {
-        if bb.is_empty() || self.is_empty() {
-            return Sampling::empty();
-        }
         let mut s = Sampling::empty();
         // First point of the current segment, if any.
         let mut p0_opt: Option<&Point> = None;
@@ -1422,6 +1419,13 @@ mod tests {
                        Some((3., 2.)), None,
                        Some((3., 1.)), Some((2., 1.)), Some((2., 0.)), None,
                        Some((0., 0.)), Some((0., 1.))]);
+    }
+
+    #[test]
+    fn clip_empty() {
+        let bb = BoundingBox {xmin: 0., xmax: 1., ymin: 0., ymax: 1.};
+        let path = xy_of_sampling(&Sampling::empty().clip(bb));
+        assert_eq!(path, vec![]);
     }
 
     #[test]
