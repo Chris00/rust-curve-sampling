@@ -521,17 +521,19 @@ impl Sampling {
             return Sampling::empty();
         }
         let mut s = Sampling::empty();
+        // First point of the current segment, if any.
         let mut p0_opt: Option<&Point> = None;
         let mut p0_inside = false;
         let mut prev_cut = true; // New path ("virtual" cut)
         for p1 in self.iter_points() {
             if prev_cut {
-                // A cut was pushed at the previous step.  This may be
-                // because the original path was just cut (`p0_opt =
-                // None`) or because the previous segment was cut
+                // A cut was pushed at an earlier step (and the path
+                // has not subsequently intersected `bb`).  This may
+                // be because the original path was just cut (`p0_opt
+                // = None`) or because the previous segment was cut
                 // (`p0_opt = Some(p0)` with `p0` ∉ `bb`) or because
-                // there was a cut and the next point `p0` is the
-                // possible new start.
+                // there was an earlier cut and the next point `p0` is
+                // the possible new start.
                 match (p0_opt, p1.is_valid()) {
                     (Some(p0), true) => {
                         let p1_inside = bb.contains(p1);
@@ -578,7 +580,13 @@ impl Sampling {
                         p0_opt = Some(p1);
                         p0_inside = bb.contains(p1);
                     }
-                    (_, false) => p0_opt = None,
+                    (Some(p0), false) => {
+                        if p0_inside {
+                            s.push_unchecked(p0.clone());
+                        }
+                        p0_opt = None;
+                    }
+                    (None, false) => (), // p0_opt == None
                 }
             } else {
                 // Previous step was not a cut which also implies that
@@ -1432,6 +1440,15 @@ mod tests {
         test_clip(bb,
                   vec![[1., 1e-100], [3., -1e-100] ],
                   vec![Some((1., 1e-100)), Some((2., 0.))]);
+    }
+
+    #[test]
+    fn clip_touches_1pt_cut() {
+        let bb = BoundingBox {xmin: 0., xmax: 2., ymax: 0., ymin: -1.};
+        let cut = [f64::NAN, f64::NAN];
+        test_clip(bb,
+                  vec![[0.,1.], cut, [1., 0.], cut, cut, [2., 1.]],
+                  vec![Some((1., 0.))])
     }
 
     #[test]
