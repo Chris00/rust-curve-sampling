@@ -255,13 +255,22 @@ impl Sampling {
         }
     }
 
-    pub(crate) fn remove_trailing_cuts(&mut self) {
-        while ! self.head.is_null() {
-            let p = unsafe { &*self.head as &Point };
-            if p.is_valid() { return }
-            // Pop the final point.
-            let p = unsafe { Box::from_raw(self.head) };
-            self.head = p.prev;
+    /// Remove the final point (if any) of the path and return it.
+    pub(crate) fn pop(&mut self) -> Option<Point> {
+        if self.tail.is_null() {
+            None
+        } else {
+            let p = unsafe { *Box::from_raw(self.tail) };
+            if p.prev.is_null() {
+                self.head = ptr::null_mut();
+            } else {
+                unsafe { (*p.prev).next = ptr::null_mut() }
+            }
+            self.tail = p.prev;
+            Some(p)
+        }
+    }
+
         }
     }
 
@@ -580,6 +589,7 @@ impl Sampling {
                     (Some(p0), false) => {
                         if p0_inside {
                             s.push_unchecked(p0.clone());
+                            s.push_unchecked(Point::cut(p0.t));
                         }
                         p0_opt = None;
                     }
@@ -613,7 +623,7 @@ impl Sampling {
                 }
             }
         }
-        s.remove_trailing_cuts();
+        if prev_cut { s.pop(); }
         s.set_vp(bb);
         s
     }
@@ -1453,6 +1463,14 @@ mod tests {
         test_clip(bb,
                   vec![[0.,1.], cut, [1., 0.], cut, cut, [2., 1.]],
                   vec![Some((1., 0.))])
+    }
+
+    #[test]
+    fn clip_final_cut() {
+        let bb = BoundingBox {xmin: 0., xmax: 1., ymin: 0., ymax: 2.};
+        test_clip(bb,
+                  vec![[0., 0.], [2., 2.]],
+                  vec![Some((0., 0.)), Some((1., 1.))])
     }
 
     #[test]
