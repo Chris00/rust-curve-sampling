@@ -1387,7 +1387,9 @@ mod tests {
     use crate::{Sampling, BoundingBox, Point};
 
     fn xy_of_sampling(s: &Sampling) -> Vec<Option<(f64, f64)>> {
-        s.iter().map(|p| p.map(|p| (p[0], p[1]))).collect()
+        s.iter_points().map(|p| {
+            if p.is_valid() { Some((p.x, p.y)) } else { None }})
+            .collect()
     }
 
     #[test]
@@ -1487,6 +1489,6 @@ mod tests {
         let s = Sampling::uniform(|x| (4. - x).sqrt(), 0., 6.).n(4).build();
         assert_eq!(xy_of_sampling(&s),
                    vec![Some((0.,2.)), Some((2., 2f64.sqrt())),
-                        Some((4., 0.))]);
+                        Some((4., 0.)), None]);
     }
 }
