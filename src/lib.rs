@@ -628,20 +628,14 @@ impl Sampling {
         s
     }
 
+    /// Create a sampling from an iterator of points.  Beware that the
+    /// invariant "`p.y` is finite ⇒ `p.x` is finite" is not checked.
     fn from_point_iterator<P>(points: P) -> Self
     where P: IntoIterator<Item = Point> {
-        let mut xmin = f64::INFINITY;
-        let mut xmax = f64::NEG_INFINITY;
-        let mut ymin = f64::INFINITY;
-        let mut ymax = f64::NEG_INFINITY;
         let mut prev_is_cut = true;
         let mut s = Sampling::empty();
         for p in points.into_iter() {
             if p.is_valid() {
-                if p.x < xmin { xmin = p.x }
-                if p.x > xmax { xmax = p.x }
-                if p.y < ymin { ymin = p.y }
-                if p.y > ymax { ymax = p.y }
                 s.push_unchecked(p);
                 prev_is_cut = false;
             } else if ! prev_is_cut {
@@ -649,7 +643,6 @@ impl Sampling {
                 prev_is_cut = true;
             }
         }
-        s.set_vp(BoundingBox { xmin, xmax, ymin, ymax });
         s
     }
 }
