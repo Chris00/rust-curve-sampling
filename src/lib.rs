@@ -645,6 +645,21 @@ impl Sampling {
         }
         s
     }
+
+    /// Create a sampling from `points` after sorting them by
+    /// increasing (if `incr`) or decreasing (if `! incr`) values of
+    /// the field `t`.
+    fn from_vec(mut points: Vec<Points>, incr: bool) -> Self {
+        if incr {
+            points.sort_unstable_by(|p1, p2| {
+                // We know that `t1` and `t2` are finite.
+                p1.t.partial_cmp(&p2.t).unwrap() });
+        } else {
+            points.sort_unstable_by(|p1, p2| {
+                p2.t.partial_cmp(&p1.t).unwrap() });
+        }
+        Self::from_point_iterator(points)
+    }
 }
 
 
@@ -833,15 +848,7 @@ macro_rules! uniform_sampling {
         for &t in &$self.init { points.push($self.f.eval(t)); }
         for &p in &$self.init_pt { points.push($point_of_pt!(p)); }
         $push_eval!(points);
-        if $self.a < $self.b {
-            points.sort_unstable_by(|p1, p2| {
-                // We know that `t1` and `t2` are finite.
-                p1.t.partial_cmp(&p2.t).unwrap() });
-        } else {
-            points.sort_unstable_by(|p1, p2| {
-                p2.t.partial_cmp(&p1.t).unwrap() });
-        }
-        Sampling::from_point_iterator(points)
+        Sampling::from_vec(points, $self.a < $self.b)
     }
 }
 
