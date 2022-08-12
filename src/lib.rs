@@ -3,6 +3,7 @@
 use std::{fmt::{self, Display, Formatter},
           io::{self, Write},
           iter::Iterator,
+          mem::swap,
           ptr, marker::PhantomData};
 use rand::prelude::*;
 use rgb::*;
