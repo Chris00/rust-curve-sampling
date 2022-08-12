@@ -89,7 +89,7 @@ use priority_queue::PQ;
 //
 // Bounding box
 
-/// A box \[`xmin`, `xmax`\] × \[`ymin`, `ymax`\].
+/// A two dimensional rectangle \[`xmin`, `xmax`\] × \[`ymin`, `ymax`\].
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct BoundingBox {
     pub xmin: f64,
@@ -146,8 +146,8 @@ impl BoundingBox {
 struct Point {
     t: f64, // "time" parameter, ALWAYS finite.
     x: f64,
-    y: f64,
-    cost: f64, // Cache the cost
+    y: f64, // `y` is finite ⇒ `x` is finite
+    cost: f64, // Cache the cost of the point (not the segment)
     prev: *mut Point,
     next: *mut Point,
 }
@@ -185,7 +185,7 @@ pub struct Sampling {
     // the costs need to to be updated.
     pq: PQ<*mut Point>,
     head: *mut Point,
-    tail: *mut Point,
+    tail: *mut Point, // tail.is_null() ⇔ head.is_null()
     vp: Option<BoundingBox>, // viewport (zone of interest)
 }
 
