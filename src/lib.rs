@@ -649,7 +649,7 @@ impl Sampling {
     /// Create a sampling from `points` after sorting them by
     /// increasing (if `incr`) or decreasing (if `! incr`) values of
     /// the field `t`.
-    fn from_vec(mut points: Vec<Points>, incr: bool) -> Self {
+    fn from_vec(mut points: Vec<Point>, incr: bool) -> Self {
         if incr {
             points.sort_unstable_by(|p1, p2| {
                 // We know that `t1` and `t2` are finite.
@@ -678,9 +678,23 @@ impl FromIterator<[f64; 2]> for Sampling {
 
 ////////////////////////////////////////////////////////////////////////
 //
-// Acceptable types & functions that provide "points"
+// Acceptable types & functions that provide "points".
+// This is internal to this library.
 
-//impl From<[f64; 2]> for Point {}
+impl From<(f64, f64)> for Point {
+    fn from((x, y): (f64, f64)) -> Self {
+        Point::new(x, x, y) // `x` ∈ \[a, b\] by [`init_pt`] checks.
+    }
+}
+
+impl From<(f64, [f64; 2])> for Point {
+    /// Assume `t` is finite.
+    fn from((t, [x,y]): (f64, [f64;2])) -> Self {
+        // Enforce the invariant: y finite ⟹ x finite
+        if x.is_finite() { Point::new(t, x, y) }
+        else { Point::cut(t) }
+    }
+}
 
 /// Values that can be treated as Fn(f64) -> Point.
 trait IntoFnPoint {
@@ -759,10 +773,11 @@ macro_rules! new_sampling_fn {
             n: usize,
             viewport: Option<BoundingBox>,
             init: Vec<f64>,
-            init_pt: Vec<(f64, $ft)>
+            init_pt: Vec<Point>,
         }
 
-        impl<F> $struct<F> {
+        impl<F> $struct<F>
+        where F: FnMut(f64) -> $ft {
             /// Set the maximum number of evaluations of the function
             /// to build the sampling.  Panic if `n < 2`.
             pub fn n(mut self, n: usize) -> Self {
@@ -805,11 +820,22 @@ macro_rules! new_sampling_fn {
             pub fn init_pt<'a, I>(mut self, pts: I) -> Self
             where I: IntoIterator<Item = &'a (f64, $ft)> {
                 for &p in pts {
-                    if self.a <= p.0 && p.0 <= self.b { // ⟹ p.0 is finite
-                        self.init_pt.push(p);
+                    if self.a <= p.0 && p.0 <= self.b { // ⟹ p.0 = t is finite
+                        self.init_pt.push(Point::from(p));
                     }
                 }
                 self
+            }
+
+            /// Evaluate the function at all initial values that where
+            /// provided through [`Self::init`].
+            fn eval_init(&mut self) {
+                // `t` ∈ \[`a`, `b`\] already checked by [`init`] and
+                // [`init_pt`].
+                for &t in &self.init {
+                    self.init_pt.push(self.f.eval(t))
+                }
+                self.init.clear()
             }
         }
     }
@@ -838,45 +864,10 @@ new_sampling_fn!(
     Uniform,
     FnPoint);
 
-macro_rules! uniform_sampling {
-    // `point_of_f` and `point_of_pt` must also validate the outputs
-    // (so they are finite).
-    ($self: ident, $point_of_pt: ident, $push_eval: ident, $n: expr) => {
-        let mut points = Vec::with_capacity(
-            $self.init.len() + $self.init_pt.len() + $n);
-        // `t` ∈ \[`a`, `b`\] already checked by [`init`] and [`init_pt`].
-        for &t in &$self.init { points.push($self.f.eval(t)); }
-        for &p in &$self.init_pt { points.push($point_of_pt!(p)); }
-        $push_eval!(points);
-        Sampling::from_vec(points, $self.a < $self.b)
-    }
-}
-
-macro_rules! almost_uniform_sampling {
-    ($self: ident, $point_of_pt: ident, $n: ident) => {
-        macro_rules! push_eval_random { ($path: ident) => {
-                let dt = ($self.b - $self.a) / ($n - 1) as f64;
-                let mut rng = rand::thread_rng();
-                $path.push($self.f.eval($self.a));
-                $path.push($self.f.eval($self.a + 0.0625 * dt));
-                for i in 0 .. $n - 4 {
-                    let j = i as f64 + rng.gen::<f64>() * 0.125 - 0.0625;
-                    $path.push($self.f.eval($self.a + j * dt));
-                }
-                $path.push($self.f.eval($self.b - 0.0625 * dt));
-                $path.push($self.f.eval($self.b));
-            } }
-        uniform_sampling!($self, $point_of_pt, push_eval_random, $n)
-    }
-}
-
-macro_rules! pt_of_couple { ($p: expr) => {{
-    let (x, y) = $p; // `x` ∈ \[a, b\] by [`init_pt`] checks.
-    Point::new(x, x, y) }}}
-
 impl<F> Uniform<F>
 where F: FnMut(f64) -> f64 {
-    pub fn build(&mut self) -> Sampling {
+    /// Return a uniform sampling of the function.
+    pub fn build(mut self) -> Sampling {
         if self.a == self.b {
             let p = self.f.eval(self.a); // `a` is finite by previous tests
             if p.is_valid() {
@@ -885,13 +876,14 @@ where F: FnMut(f64) -> f64 {
                 return Sampling::empty()
             }
         }
-        macro_rules! push_eval { ($points: ident) => {
-            let dt = (self.b - self.a) / (self.n - 1) as f64;
-            for i in 0 .. self.n {
-                let t = self.a + i as f64 * dt;
-                $points.push(self.f.eval(t)); }
-        } }
-        uniform_sampling!{self, pt_of_couple, push_eval, self.n}
+        self.eval_init();
+        let mut points = self.init_pt;
+        let dt = (self.b - self.a) / (self.n - 1) as f64;
+        for i in 0 .. self.n {
+            let t = self.a + i as f64 * dt;
+            points.push(self.f.eval(t));
+        }
+        Sampling::from_vec(points, self.a < self.b)
     }
 }
 
@@ -1029,34 +1021,61 @@ mod cost {
 // Function sampling
 
 fn refine_gen(s: &mut Sampling, n: usize,
+              mut f: impl FnMut(f64) -> Point,
               in_vp: impl Fn(&Point) -> bool) {
 
 }
 
-macro_rules! build { ($self: ident) => {{
-    if $self.a == $self.b {
-        let p = $self.f.eval($self.a);
-        if p.is_valid() {
-            return Sampling::singleton(p);
-        } else {
-            return Sampling::empty()
         }
     }
-    let n0 = ($self.n / 10).min(10);
-    let mut s = $self.almost_uniform(n0);
-    match $self.viewport {
-        Some(vp) => {
-            let in_vp = |p: &Point| vp.contains(p);
-            cost::compute(&mut s, in_vp);
-            refine_gen(&mut s, $self.n - n0, in_vp)
-        }
-        None => {
-            cost::compute(&mut s, |_| true);
-            refine_gen(&mut s, $self.n - n0, |_| true)
-        }
+}
+
+fn push_almost_uniform_sampling(points: &mut Vec<Point>,
+                                f: &mut impl FnMut(f64) -> Point,
+                                a: f64, b: f64, n: usize) {
+    let dt = (b - a) / (n - 1) as f64;
+    let mut rng = rand::thread_rng();
+    points.push(f(a));
+    points.push(f(a + 0.0625 * dt));
+    for i in 0 .. n - 4 {
+        let j = i as f64 + rng.gen::<f64>() * 0.125 - 0.0625;
+        points.push(f(a + j * dt));
     }
-    s
-}}}
+    points.push(f(b - 0.0625 * dt));
+    points.push(f(b));
+}
+
+impl Sampling {
+    /// Return a sampling from the initial list of `points`
+    fn build(mut points: Vec<Point>,
+             mut f: impl FnMut(f64) -> Point,
+             a: f64, b: f64, n: usize,
+             viewport: Option<BoundingBox>) -> Sampling {
+        if a == b {
+            let p = f(a);
+            if p.is_valid() {
+                return Sampling::singleton(p);
+            } else {
+                return Sampling::empty()
+            }
+        }
+        let n0 = (n / 10).min(10);
+        push_almost_uniform_sampling(&mut points, &mut f, a, b, n0);
+        let mut s = Sampling::from_vec(points, a < b);
+        match viewport {
+            Some(vp) => {
+                let in_vp = |p: &Point| vp.contains(p);
+                cost::compute(&mut s, in_vp);
+                refine_gen(&mut s, n - n0, &mut f, in_vp)
+            }
+            None => {
+                cost::compute(&mut s, |_| true);
+                refine_gen(&mut s, n - n0, &mut f, |_| true)
+            }
+        }
+        s
+    }
+}
 
 
 new_sampling_fn!(
@@ -1080,12 +1099,12 @@ new_sampling_fn!(
 
 impl<F> Fun<F>
 where F: FnMut(f64) -> f64 {
-    fn almost_uniform(&mut self, n: usize) -> Sampling {
-        almost_uniform_sampling!{self, pt_of_couple, n}
-    }
-
     /// Return the sampling.
-    pub fn build(&mut self) -> Sampling { build!(self) }
+    pub fn build(mut self) -> Sampling {
+        self.eval_init();
+        Sampling::build(self.init_pt, |x| self.f.eval(x),
+                        self.a, self.b, self.n, self.viewport)
+    }
 }
 
 
@@ -1110,17 +1129,12 @@ new_sampling_fn!(
 
 impl<F> Param<F>
 where F: FnMut(f64) -> [f64; 2] {
-    fn almost_uniform(&mut self, n: usize) -> Sampling {
-        macro_rules! pt { ($p: expr) => {{
-            let (t, [x,y]) = $p;
-            if x.is_finite() { Point::new(t, x, y) }
-            else { Point::new(t, x, f64::NAN) }
-        }}}
-        almost_uniform_sampling!{self, pt, n}
-    }
-
     /// Return the sampling.
-    pub fn build(&mut self) -> Sampling { build!(self) }
+    pub fn build(mut self) -> Sampling {
+        self.eval_init();
+        Sampling::build(self.init_pt, |t| self.f.eval(t),
+                        self.a, self.b, self.n, self.viewport)
+    }
 }
 
 
