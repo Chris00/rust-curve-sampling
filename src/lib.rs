@@ -9,7 +9,7 @@ use rand::prelude::*;
 use rgb::*;
 
 mod priority_queue;
-use priority_queue::PQ;
+use priority_queue::{PQ, Witness};
 
 ////////////////////////////////////////////////////////////////////////
 //
@@ -68,7 +68,7 @@ impl BoundingBox {
 /// follow each other (to track ranges of t outside the domain of the
 /// function) except at the boundary of the path where at most 1 cut
 /// is allowed.
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone)]
 struct Point {
     t: f64, // "time" parameter, ALWAYS finite.
     x: f64,
@@ -76,6 +76,7 @@ struct Point {
     cost: f64, // Cache the cost of the point (not the segment)
     prev: *mut Point,
     next: *mut Point,
+    witness: Witness<*mut Point>,
 }
 
 impl Point {
@@ -85,7 +86,8 @@ impl Point {
     fn new(t: f64, x: f64, y: f64) -> Self {
         Point { t, x, y,  cost: 0.,
                 prev: ptr::null_mut(),
-                next: ptr::null_mut() }
+                next: ptr::null_mut(),
+                witness: Witness::invalid() }
     }
 
     #[inline]
@@ -93,7 +95,8 @@ impl Point {
         Point { t, x: f64::NAN, y: f64::NAN,
                 cost: 0.,
                 prev: ptr::null_mut(),
-                next: ptr::null_mut() }
+                next: ptr::null_mut(),
+                witness: Witness::invalid() }
     }
 
     /// Return `true` if the point is valid — otherwise it is a cut.
@@ -819,7 +822,7 @@ where F: FnMut(f64) -> f64 {
 // Cost
 
 mod cost {
-    use super::{Point, Sampling, Lengths};
+    use super::{Point, Sampling, Lengths, PQ};
 
     // The cost of a point is a measure of the curvature at this
     // point.  This requires segments before and after the point.  In
@@ -899,6 +902,14 @@ mod cost {
         }
     }
 
+    fn push_segment(pq: &mut PQ<*mut Point>, p0: &mut Point, p1: &Point,
+                    len: Lengths, in_vp: bool) {
+        let cost_segment = segment_vp(p0, p1, len, in_vp);
+        // The segment is referred to by its first point.
+        let w = pq.push(cost_segment, p0 as *mut _);
+        p0.witness = w;
+    }
+
     /// Update the cost of all points in the sampling and add segments
     /// to the priority queue.
     pub(crate) fn compute(s: &mut Sampling, in_vp: impl Fn(&Point) -> bool) {
@@ -924,21 +935,14 @@ mod cost {
                     pm_in_vp = false;
                     pm.cost = 0.;
                 }
-                let cost_segment;
                 // Segment [p0, pm]
-                cost_segment = segment_vp(p0, pm, len,
-                                          p0_in_vp || pm_in_vp);
-                // The segment is referred to by its first point.
-                pq.push(cost_segment, p0 as *mut _);
+                push_segment(pq, p0, pm, len, p0_in_vp || pm_in_vp);
                 p0 = pm;
                 p0_in_vp = pm_in_vp;
                 pm = p1;
             }
             pm.cost = 0.; // last point
-            let cost_segment;
-            cost_segment = segment_vp(p0, pm, len,
-                                      p0_in_vp || in_vp(pm));
-            pq.push(cost_segment, p0 as *mut _);
+            push_segment(pq, p0, pm, len, p0_in_vp || in_vp(pm));
         }
     }
 }
