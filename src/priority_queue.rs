@@ -70,15 +70,14 @@ impl<T> Node<T> {
     /// Recursively drop all nodes from a priority queue.  When
     /// passing the pointer to the root as `node_ptr`, use null for
     /// `last_sibling_ptr`.
-    fn drop(node_ptr: *mut Node<T>, last_sibling_ptr: *mut Node<T>) {
-        let mut ptr = node_ptr;
-        while ptr != last_sibling_ptr {
-            debug_assert!(!ptr.is_null());
-            let node = unsafe { Box::from_raw(ptr) };
-            if Self::has_children(ptr) {
-                Self::drop(node.child, ptr);
+    fn drop(mut node_ptr: *mut Node<T>, last_sibling_ptr: *mut Node<T>) {
+        while node_ptr != last_sibling_ptr {
+            debug_assert!(!node_ptr.is_null());
+            let node = unsafe { Box::from_raw(node_ptr) };
+            if Self::has_children(node_ptr) {
+                Self::drop(node.child, node_ptr);
             }
-            ptr = node.sibling;
+            node_ptr = node.sibling;
         }
     }
 
