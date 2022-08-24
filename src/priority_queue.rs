@@ -13,7 +13,7 @@
 // heap" (PDF). Algorithmica. 1 (1): 111–129. doi:10.1007/BF01840439.
 
 use std::{cmp::Ordering,
-          ptr};
+          ptr::NonNull};
 
 /// `f64` numbers at the exclusion of NaN.
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -38,79 +38,89 @@ impl Ord for NotNAN {
 struct Node<T> {
     priority: NotNAN,
     item: T,
-    child: *mut Node<T>, // points to the node itself if no child.
-    sibling: *mut Node<T>, // next older sibling, parent if last, null if root.
-    parent: *mut Node<T>, // null if root.
+    child: NonNull<Node<T>>, // points to the node itself if no child.
+    sibling: NonNull<Node<T>>, // next older sibling, parent if last,
+                               // itself if root.
+    parent: Option<NonNull<Node<T>>>, // None if root.
 }
+
 
 impl<T> Node<T> {
     /// Return a pointer to a newly created node (i.e., a priority
     /// queue with a single node).  The user is responsible for
     /// freeing the returned node.
-    fn new_ptr(priority: f64, item: T) -> *mut Self {
-        debug_assert!(!priority.is_nan());
+    fn new(priority: f64, item: T) -> NonNull<Self> {
+        assert!(!priority.is_nan());
         let n = Node { priority: NotNAN(priority), item,
-                       child: ptr::null_mut(),
-                       sibling: ptr::null_mut(),
-                       parent: ptr::null_mut() };
-        let n_ptr = Box::into_raw(Box::new(n));
-        unsafe { (*n_ptr).child = n_ptr };
-        n_ptr
+                       child: NonNull::dangling(),
+                       sibling: NonNull::dangling(),
+                       parent: None };
+        unsafe {
+            let mut n = NonNull::new_unchecked(
+                Box::into_raw(Box::new(n)));
+            n.as_mut().child = n;
+            n.as_mut().sibling = n;
+            n }
     }
 
     #[inline]
-    fn has_children(node_ptr: *mut Self) -> bool {
-        debug_assert!(!node_ptr.is_null());
-        unsafe { (*node_ptr).child != node_ptr }
+    fn has_children(node: NonNull<Self>) -> bool {
+        unsafe { node.as_ref().child != node }
     }
 
-    #[inline]
-    fn is_root(&self) -> bool { self.parent.is_null() }
-
-    /// Recursively drop all nodes from a priority queue.  When
-    /// passing the pointer to the root as `node_ptr`, use null for
-    /// `last_sibling_ptr`.
-    fn drop(mut node_ptr: *mut Node<T>, last_sibling_ptr: *mut Node<T>) {
-        while node_ptr != last_sibling_ptr {
-            debug_assert!(!node_ptr.is_null());
-            let node = unsafe { Box::from_raw(node_ptr) };
-            if Self::has_children(node_ptr) {
-                Self::drop(node.child, node_ptr);
+    /// Recursively drop all *non-root* nodes from a priority queue.
+    /// When passing the pointer to the root as `node`, use null for
+    /// `last_sibling`.
+    fn drop(mut node: NonNull<Node<T>>, last_sibling: NonNull<Node<T>>) {
+        while node != last_sibling {
+            if Self::has_children(node) {
+                Self::drop(unsafe { node.as_ref().child }, node);
             }
-            node_ptr = node.sibling;
+            let n = unsafe { Box::from_raw(node.as_ptr()) };
+            node = n.sibling;
         }
     }
 
     /// Link two priority queues.
+    ///
+    /// # Invariant
+    /// If `n1` or `n2` is not configured as the root of a PQ, the
+    /// resulting node may neither configured as the root of a PQ
+    /// (i.e., `sibling` and `parent` may not respect the
+    /// specification).
     #[inline]
-    fn link(n1_ptr: *mut Self, n2_ptr: *mut Self) -> *mut Self {
-        debug_assert!(!n1_ptr.is_null() && !n2_ptr.is_null());
-        let mut n1 = unsafe { &mut *n1_ptr as &mut Self };
-        let mut n2 = unsafe { &mut *n2_ptr as &mut Self };
-        if n1.priority >= n2.priority {
-            // Because of the convention that the sibling = parent if
-            // last, we do not have to make a special case if n2 is
-            // the first child (in which case n1.child == n1_ptr).
-            n2.sibling = n1.child;  n2.parent = n1_ptr;
-            n1.child = n2_ptr;
-            n1_ptr
-        } else {
-            n1.sibling = n2.child;  n1.parent = n2_ptr;
-            n2.child = n1_ptr;
-            n2_ptr
+    fn link(mut n1: NonNull<Self>, mut n2: NonNull<Self>) -> NonNull<Self> {
+        unsafe {
+            if n1.as_ref().priority >= n2.as_ref().priority {
+                // Because of the convention that the sibling = parent
+                // if last, we do not have to make a special case if
+                // n2 is the first child (in which case n1.child == n1).
+                n2.as_mut().sibling = n1.as_ref().child;
+                n2.as_mut().parent = Some(n1);
+                n1.as_mut().child = n2;
+                n1
+            } else {
+                n1.as_mut().sibling = n2.as_ref().child;
+                n1.as_mut().parent = Some(n2);
+                n2.as_mut().child = n1;
+                n2
+            }
         }
     }
 }
 
 /// Priority queue holding elements of type T.
 pub struct PQ<T> {
-    root: *mut Node<T>
+    root: Option<NonNull<Node<T>>>
 }
 
 impl<T> Drop for PQ<T> {
     fn drop(&mut self) {
-        if !self.root.is_null() {
-            Node::drop(self.root, ptr::null_mut())
+        if let Some(root) = self.root {
+            if Node::has_children(root) {
+                Node::drop(unsafe { root.as_ref().child }, root)
+            }
+            unsafe { Box::from_raw(root.as_ptr()) }; // drop root
         }
     }
 }
@@ -118,149 +128,154 @@ impl<T> Drop for PQ<T> {
 /// Witness for a node.  It enables increasing the node priority.
 #[derive(Debug)]
 pub struct Witness<T> {
-    node_ptr: *mut Node<T>
+    node: NonNull<Node<T>>
 }
-
-impl<T> Clone for Witness<T> {
-    // Reset the pointer on Clone because only one value `T` should be
-    // able to change the `Node` in the priority queue.
-    fn clone(&self) -> Self {
-        Self { node_ptr: ptr::null_mut() }
-    }
-}
-
-impl<T> Witness<T> {
-    /// Witness that cannot be used with `increase_priority`.
-    pub fn invalid() -> Self {
-        Self { node_ptr: ptr::null_mut() }
-    }
-}
-
 
 impl<T> PQ<T> {
     /// Create an empty priority queue.
     #[inline]
-    pub fn new() -> Self { PQ { root: ptr::null_mut() } }
+    pub fn new() -> Self { PQ { root: None } }
 
-    /// Return `true` if the priority queue is empty.
+    // Return `true` if the priority queue is empty.
+    // #[inline]
+    // pub fn is_empty(&self) -> bool { self.root.is_none() }
+
+    /// Push a node to a tree.
+    ///
+    /// # Invariant
+    /// If `node` is not configured as the root of a PQ, `self` may
+    /// neither configured as the root of a PQ (i.e., `sibling` and
+    /// `parent` may not respect the specification).
     #[inline]
-    pub fn is_empty(&self) -> bool { self.root.is_null() }
-
-    /// Return a reference to the maximal item in the queue, or `None`
-    /// if the queue is empty.
-    pub fn max(&self) -> Option<&T> {
-        if self.is_empty() { None }
-        else { unsafe { Some(&(*self.root).item) } }
-    }
-
-    #[inline]
-    fn push_node(&mut self, node_ptr: *mut Node<T>) {
-        if self.is_empty() {
-            self.root = node_ptr;
-        } else {
-            self.root = Node::link(node_ptr, self.root);
+    fn push_node(&mut self, node: NonNull<Node<T>>) {
+        match self.root {
+            None => self.root = Some(node),
+            Some(root) =>
+                self.root = Some(Node::link(root, node))
         }
     }
 
-    /// Pushes `item` with `priority` to the queue.  Return a
-    /// reference to the internal node in order to be able to increase
-    /// the priority.  That reference only lives as long as the node
-    /// is in `self`.  This is not enforced by the type system.
+    /// Pushes `item` with `priority` to the queue and set a reference
+    /// to the internal of the PQ in order to be able to increase the
+    /// priority.
+    ///
+    /// # Safety
+    /// That reference only lives as long as the PQ does.  This is not
+    /// enforced by the type system.  (The reference is updated when
+    /// the node is popped out of the PQ so cannot be misused).
     pub fn push(&mut self, priority: f64, item: T) -> Witness<T> {
-        assert!(!priority.is_nan());
-        let node_ptr = Node::new_ptr(priority, item);
-        self.push_node(node_ptr);
-        // The node is owned by the priority queue.
-        Witness { node_ptr }
+        // `Node::new` checks for NaN and returns a node configured as
+        // the root of a PQ.
+        let node = Node::new(priority, item);
+        self.push_node(node); // The node is owned by the priority queue.
+        Witness { node }
     }
 
     /// Link all the children of a deleted node, the first child being
-    /// pointed to by `p0_ptr` (which thus cannot be the root).
-    fn link_pairs(n0_ptr: *mut Node<T>, last_sibling_ptr: *mut Node<T>)
-                  -> *mut Node<T> {
+    /// pointed to by `n0` (which thus cannot be the root).
+    /// Return a *root* node to the linked tree.
+    fn link_pairs(n0: NonNull<Node<T>>, last_sibling: NonNull<Node<T>>)
+                  -> NonNull<Node<T>> {
         // Instead of using recursion, we accumulate the pairs in a vector.
         let mut pair = Vec::new();
-        let mut n1_ptr = n0_ptr;
-        while n1_ptr != last_sibling_ptr {
-            debug_assert!(!n1_ptr.is_null());
-            let n2_ptr = unsafe { (*n1_ptr).sibling };
-            if n2_ptr != last_sibling_ptr {
-                pair.push(Node::link(n1_ptr, n2_ptr));
-                n1_ptr = unsafe { (*n2_ptr).sibling };
+        let mut n1 = n0;
+        while n1 != last_sibling {
+            let n2 = unsafe { n1.as_ref().sibling };
+            if n2 != last_sibling {
+                // Save the initial sibling because the node pointed
+                // to may be changed.
+                let sibling = unsafe { n2.as_ref().sibling };
+                pair.push(Node::link(n1, n2));
+                n1 = sibling;
             } else { // n1_ptr is the last sibling
-                pair.push(n1_ptr);
+                pair.push(n1);
                 break
             }
         }
-        // Combine the pairs right-to-left.
-        debug_assert!(!pair.is_empty());
+        // Combine the (non-empty vector of) pairs right-to-left.
         let mut pair = pair.iter().rev();
         let mut combined = *pair.next().unwrap();
         for &n in pair {
             combined = Node::link(n, combined)
+        }
+        unsafe { // Configure as root node.
+            combined.as_mut().parent = None;
+            combined.as_mut().sibling = combined;
         }
         combined
     }
 
     /// Removes the greatest element from the priority queue and
     /// returns it, or `None` if the queue is empty.
+    ///
+    /// # Safety
+    /// If there were witnesses to the popped out node, they can no
+    /// longer be used.
     pub fn pop(&mut self) -> Option<T> {
-        if self.is_empty() { return None }
-        let root_has_children = Node::has_children(self.root);
-        let root = unsafe { Box::from_raw(self.root) };
-        if root_has_children {
-            let root1_ptr = Self::link_pairs(root.child, self.root);
-            unsafe {
-                (*root1_ptr).parent = root1_ptr;
-                (*root1_ptr).sibling = root1_ptr;
+        match self.root {
+            None => None,
+            Some(root) => {
+                if Node::has_children(root) {
+                    self.root = Some(Self::link_pairs(
+                        unsafe { root.as_ref().child }, root))
+                } else {
+                    self.root = None
+                }
+                // Finally, pop up (drop) the root.
+                let node = unsafe { Box::from_raw(root.as_ptr()) };
+                Some(node.item)
             }
-            self.root = root1_ptr;
-        } else {
-            self.root = ptr::null_mut()
         }
-        Some(root.item)
     }
 
     /// Set the priority of node pointed by `w` to `priority` if it is
     /// higher than the existing priority (otherwise, do nothing).
+    ///
+    /// # Safety
     /// BEWARE that the node pointed by `w` must be in the queue
     /// `self` otherwise it is undefined behavior.
-    #[allow(unused_unsafe)]
-    pub unsafe fn increase_priority(&mut self, w: Witness<T>, priority: f64) {
-        debug_assert!(!w.node_ptr.is_null());
-        let mut node = unsafe { &mut *w.node_ptr as &mut Node<T> };
-        if priority > node.priority.0 { // ⟹ `priority` is not NaN
-            let priority = NotNAN(priority);
-            if node.is_root() {
-                node.priority = priority;
-            } else {
+    //
+    // REMARK: There is a risk that the witness is not for the
+    // appropriate queue.  Since this is an internal API and there
+    // will be a single PQ per sampling, the risk is minimal and we
+    // did not add a pointer to the queue in the witness.
+    pub unsafe fn increase_priority(&mut self, w: &Witness<T>, priority: f64) {
+        let mut node = w.node;
+        if ! (priority > node.as_ref().priority.0) {
+            return
+        }
+        debug_assert!(!priority.is_nan());
+        let priority = NotNAN(priority);
+        match node.as_ref().parent {
+            None => node.as_mut().priority = priority, // root node
+            Some(mut parent) => {
                 // Cut `node` (and its children) from the tree and
                 // re-insert it with the new `priority`.
-                debug_assert!(!node.parent.is_null());
-                let mut parent = unsafe { &mut *node.parent as &mut Node<T> };
-                if parent.child == w.node_ptr { // first (possibly only) child
-                    parent.child = node.sibling;
+                if parent.as_ref().child == node {
+                    // First (possibly only) child
+                    parent.as_mut().child = node.as_ref().sibling;
                 } else {
-                    let mut n_prev = parent.child;
-                    while unsafe { (*n_prev).sibling } != w.node_ptr {
-                        n_prev = unsafe { (*n_prev).sibling };
+                    let mut n_prev = parent.as_ref().child;
+                    while n_prev.as_ref().sibling != node {
+                        n_prev = n_prev.as_ref().sibling;
                     }
-                    unsafe { (*n_prev).sibling = node.sibling }
+                    n_prev.as_mut().sibling = node.as_ref().sibling
                 }
-                node.priority = priority;       // detached node
-                node.sibling = ptr::null_mut();
-                node.parent = ptr::null_mut();
-                self.push_node(w.node_ptr)
+                // `node` is detached from the PQ, configure as root
+                node.as_mut().priority = priority;
+                node.as_mut().sibling = node;
+                node.as_mut().parent = None;
+                self.push_node(node)
             }
         }
     }
 }
 
 
-
 #[cfg(test)]
 mod test {
     use super::PQ;
+    use rand::prelude::*;
 
     #[test]
     fn basic() {
@@ -268,23 +283,50 @@ mod test {
         q.push(1., "a");
         q.push(2., "b");
         q.push(0., "c");
+        q.push(-1., "d");
         assert_eq!(q.pop(), Some("b"));
         assert_eq!(q.pop(), Some("a"));
         assert_eq!(q.pop(), Some("c"));
+        assert_eq!(q.pop(), Some("d"));
         assert_eq!(q.pop(), None);
     }
 
-        #[test]
+    #[test]
     fn increase_priority() {
         let mut q = PQ::new();
         q.push(1., "a");
         q.push(2., "b");
         let w = q.push(0., "c");
-        unsafe { q.increase_priority(w, 3.); }
+        unsafe { q.increase_priority(&w, 3.); }
         assert_eq!(q.pop(), Some("c"));
         assert_eq!(q.pop(), Some("b"));
         assert_eq!(q.pop(), Some("a"));
         assert_eq!(q.pop(), None);
+    }
+
+    #[test]
+    fn spike_priority() {
+        let n0 = 100;
+        let mut q = PQ::new();
+        let n1 = n0 / 2;
+        for i in 0 .. n1 { q.push(i as f64, "a"); }
+        for i in n1 .. n0 { q.push((n0 - i) as f64, "a"); }
+        let mut n = 0;
+        while let Some(_) = q.pop() { n += 1 }
+        assert_eq!(n, n0)
+    }
+
+    #[test]
+    fn random_priority() {
+        let n0 = 100;
+        let mut q = PQ::new();
+        let mut rng = rand::thread_rng();
+        for _ in 0 .. n0 {
+            q.push(rng.gen::<f64>(), "a");
+        }
+        let mut n = 0;
+        while let Some(_) = q.pop() { n += 1 }
+        assert_eq!(n, n0)
     }
 
 }
