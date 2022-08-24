@@ -188,7 +188,7 @@ impl Sampling {
     /// interspaced by `None`.  Two `None` never follow each
     /// other.  Isolated points `p` are given by ... `None`,
     /// `Some(p)`, `None`,...
-    pub fn iter<'a>(&'a self) -> impl Iterator<Item=Option<[f64; 2]>> + 'a {
+    pub fn iter(&self) -> impl Iterator<Item=Option<[f64; 2]>> + '_ {
         let mut prev_is_cut = false;
         self.path.iter().filter_map(move |p| {
             if p.is_valid() {
@@ -225,16 +225,11 @@ impl Sampling {
             Some(None) => unreachable!(),
             None => return BoundingBox::empty()
         };
-        for p_opt in points {
-            match p_opt {
-                Some([x, y]) => {
-                    if x < bb.xmin { bb.xmin = x }
-                    else if bb.xmax < x { bb.xmax = x };
-                    if y < bb.ymin { bb.ymin = y }
-                    else if bb.ymax < y { bb.ymax = y };
-                }
-                None => ()
-            }
+        for [x, y] in points.flatten() {
+            if x < bb.xmin { bb.xmin = x }
+            else if bb.xmax < x { bb.xmax = x };
+            if y < bb.ymin { bb.ymin = y }
+            else if bb.ymax < y { bb.ymax = y };
         }
         bb
     }
@@ -352,15 +347,14 @@ impl Sampling {
                             if p1_inside {
                                 s.path.push_back(p1.clone());
                                 prev_cut = false;
-                            } else {
-                                if let Some(p) = Self::intersect(p0, p1, bb) {
+                            } else if
+                                let Some(p) = Self::intersect(p0, p1, bb) {
                                     let t = p.t;
                                     s.path.push_back(p);
                                     s.path.push_back(Point::cut(t));
                                 } else {
                                     s.path.push_back(Point::cut(p0.t));
                                 }
-                            }
                         } else if p1_inside { // p0 ∉ bb, p1 ∈ bb
                             if let Some(p) = Self::intersect(p1, p0, bb) {
                                 s.path.push_back(p); // p ≠ p1
@@ -760,7 +754,7 @@ mod cost {
     #[inline]
     pub(crate) fn segment(p0: &Point, p1: &Point, len: Lengths) -> f64 {
         let dt = (p1.t - p0.t) / len.t; // ∈ [0,1]
-        debug_assert!(dt >= 0. && dt <= 1.);
+        debug_assert!((0. ..=1.).contains(&dt));
         // Put less efforts when `dt` is small.  For functions, the
         // Y-variation may be large but, if it happens for a small range
         // of `t`, there is no point in adding indistinguishable details.
@@ -808,7 +802,7 @@ unsafe fn update_segment(pq: &mut PQ, p0: &Point, p1: &Point, len: Lengths) {
     match &p0.witness {
         Some(w) => {
             let priority = cost::segment(p0, p1, len);
-            pq.increase_priority(&w, priority)
+            pq.increase_priority(w, priority)
         }
         None => panic!("Sampling::update_segment: unset witness"),
     }
@@ -1148,8 +1142,8 @@ impl<'a> LaTeX<'a> {
             Some([x, y]) => {
                 n += 1;
                 if new_path {
-                    write!(f, "\\pgfpathmoveto{{\\pgfpointxy\
-                               {{{:.16}}}{{{:.16}}}}}\n", x, y)?
+                    writeln!(f, "\\pgfpathmoveto{{\\pgfpointxy\
+                                 {{{:.16}}}{{{:.16}}}}}", x, y)?
                 } else if n >= self.n {
                     write!(f, "\\pgfpathlineto{{\\pgfpointxy\
                                {{{:.16}}}{{{:.16}}}}}\n\
@@ -1158,13 +1152,13 @@ impl<'a> LaTeX<'a> {
                                {{{:.16}}}{{{:.16}}}}}\n", x, y, x, y)?;
                     n = 0;
                 } else {
-                    write!(f, "\\pgfpathlineto{{\\pgfpointxy\
-                               {{{:.16}}}{{{:.16}}}}}\n", x, y)?
+                    writeln!(f, "\\pgfpathlineto{{\\pgfpointxy\
+                                 {{{:.16}}}{{{:.16}}}}}", x, y)?
                 }
                 new_path = false;
             }
             None =>  {
-                write!(f, "\\pgfusepath{{stroke}}\n")?;
+                writeln!(f, "\\pgfusepath{{stroke}}")?;
                 n = 0;
                 new_path = true;
             }
@@ -1206,7 +1200,7 @@ impl<'a> LaTeX<'a> {
                     let dy = y - y0;
                     let l = dx.hypot(dy);
                     if rem_len <= l {
-                        write!(f, "\\pgfusepath{{stroke}}\n")?;
+                        writeln!(f, "\\pgfusepath{{stroke}}")?;
                         // Drawing a long path with an arrow specified is
                         // extremely expensive.  Just draw the current segment.
                         let pct = rem_len / l;
@@ -1247,19 +1241,19 @@ impl<'a> LaTeX<'a> {
                                    {{{:.16}}}{{{:.16}}}}}\n", x, y, x, y)?;
                         n = 0;
                     } else {
-                        write!(f, "\\pgfpathlineto{{\\pgfpointxy\
-                                   {{{:.16}}}{{{:.16}}}}}\n", x, y)?
+                        writeln!(f, "\\pgfpathlineto{{\\pgfpointxy\
+                                     {{{:.16}}}{{{:.16}}}}}", x, y)?
                     }
                     rem_len -= l;
                 } else {
                     // No previous point.  New sub-path.
-                    write!(f, "\\pgfpathmoveto{{\\pgfpointxy\
-                               {{{:.16}}}{{{:.16}}}}}\n", x, y)?
+                    writeln!(f, "\\pgfpathmoveto{{\\pgfpointxy\
+                                 {{{:.16}}}{{{:.16}}}}}", x, y)?
                 }
                 prev_pt = p;
             }
             None => {
-                write!(f, "\\pgfusepath{{stroke}}\n")?;
+                writeln!(f, "\\pgfusepath{{stroke}}")?;
                 rem_len = *lens.next().unwrap();
                 prev_pt = None;
             }
@@ -1269,15 +1263,13 @@ impl<'a> LaTeX<'a> {
 
     /// Write the sampling to the formatter as PGF/TikZ commands.
     pub fn write(&self, f: &mut impl Write) -> Result<(), io::Error> {
-        write!(f, "% Written by the Rust curve_sampling crate.\n")?;
-        write!(f, "\\begin{{pgfscope}}\n")?;
-        match self.color {
-            Some(RGB8 {r, g, b}) =>
-                write!(f, "\\definecolor{{RustCurveSamplingColor}}{{RGB}}\
-                           {{{},{},{}}}\n\
-                           \\pgfsetstrokecolor{{RustCurveSamplingColor}}\n",
-                       r, g, b)?,
-            None => (),
+        writeln!(f, "% Written by the Rust curve_sampling crate.")?;
+        writeln!(f, "\\begin{{pgfscope}}")?;
+        if let Some(RGB8 {r, g, b}) = self.color {
+            write!(f, "\\definecolor{{RustCurveSamplingColor}}{{RGB}}\
+                       {{{},{},{}}}\n\
+                       \\pgfsetstrokecolor{{RustCurveSamplingColor}}\n",
+                   r, g, b)?
         }
         match (self.arrow, self.arrow_pos) {
             (None, None) => self.write_with_lines(f)?,
@@ -1304,8 +1296,8 @@ impl Sampling {
     pub fn write(&self, f: &mut impl Write) -> Result<(), io::Error> {
         for p in self.iter() {
             match p {
-                Some([x, y]) => write!(f, "{:e} {:e}\n", x, y)?,
-                None => write!(f, "\n")?,
+                Some([x, y]) => writeln!(f, "{:e} {:e}", x, y)?,
+                None => writeln!(f)?,
             }
         }
         Ok(())
@@ -1320,8 +1312,8 @@ impl Display for Sampling {
     fn fmt(&self, f: &mut Formatter<'_>) -> Result<(), fmt::Error> {
         for p in self.iter() {
             match p {
-                Some([x, y]) => write!(f, "{:e} {:e}\n", x, y)?,
-                None => write!(f, "\n")?,
+                Some([x, y]) => writeln!(f, "{:e} {:e}", x, y)?,
+                None => writeln!(f)?,
             }
         }
         Ok(())

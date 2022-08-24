@@ -241,10 +241,10 @@ impl<T> PQ<T> {
     // did not add a pointer to the queue in the witness.
     pub unsafe fn increase_priority(&mut self, w: &Witness<T>, priority: f64) {
         let mut node = w.node;
-        if ! (priority > node.as_ref().priority.0) {
+        assert!(!priority.is_nan());
+        if priority <= node.as_ref().priority.0 {
             return
         }
-        debug_assert!(!priority.is_nan());
         let priority = NotNAN(priority);
         match node.as_ref().parent {
             None => node.as_mut().priority = priority, // root node
@@ -312,7 +312,7 @@ mod test {
         for i in 0 .. n1 { q.push(i as f64, "a"); }
         for i in n1 .. n0 { q.push((n0 - i) as f64, "a"); }
         let mut n = 0;
-        while let Some(_) = q.pop() { n += 1 }
+        while q.pop().is_some() { n += 1 }
         assert_eq!(n, n0)
     }
 
@@ -325,7 +325,7 @@ mod test {
             q.push(rng.gen::<f64>(), "a");
         }
         let mut n = 0;
-        while let Some(_) = q.pop() { n += 1 }
+        while q.pop().is_some() { n += 1 }
         assert_eq!(n, n0)
     }
 

@@ -338,7 +338,7 @@ mod test {
         assert_eq!(unsafe { w.as_ref() }, &"a");
         unsafe {
             *w.as_mut() = "c";
-            l.insert_after(&mut w, &"d"); }
+            l.insert_after(&mut w, "d"); }
         let v: Vec<_> = l.iter_mut().collect();
         assert_eq!(v, vec![&"c", &"d", &"b"]);
     }
@@ -363,8 +363,8 @@ mod test {
         let mut l = List::new();
         let mut w = l.push_back("a");
         l.push_back("b");
-        let mut w1 = unsafe { l.insert_after(&mut w, &"d") };
-        unsafe { l.insert_after(&mut w1, &"e"); }
+        let mut w1 = unsafe { l.insert_after(&mut w, "d") };
+        unsafe { l.insert_after(&mut w1, "e"); }
         let v: Vec<_> = l.iter_mut().collect();
         assert_eq!(v, vec![&"a", &"d", &"e", &"b"]);
     }
