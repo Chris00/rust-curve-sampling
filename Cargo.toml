@@ -14,11 +14,3 @@ categories = ["mathematics", "science"]
 [dependencies]
 rand = "0.8.5"
 rgb = "0.8.32"
-
-[[example]]
-name = "latex_speed"
-path = "examples/latex_speed.rs"
-
-[[example]]
-name = "arrows"
-path = "examples/arrows.rs"
