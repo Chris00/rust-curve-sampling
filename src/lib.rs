@@ -3,13 +3,15 @@
 use std::{fmt::{self, Display, Formatter},
           io::{self, Write},
           iter::Iterator,
-          mem::swap,
-          ptr, marker::PhantomData};
+          mem::swap};
 use rand::prelude::*;
 use rgb::*;
 
 mod priority_queue;
-use priority_queue::{PQ, Witness};
+use priority_queue as pq;
+
+mod list;
+use list::List;
 
 ////////////////////////////////////////////////////////////////////////
 //
@@ -68,40 +70,43 @@ impl BoundingBox {
 /// follow each other (to track ranges of t outside the domain of the
 /// function) except at the boundary of the path where at most 1 cut
 /// is allowed.
-#[derive(Debug, Clone)]
+#[derive(Debug)]
 struct Point {
     t: f64, // "time" parameter, ALWAYS finite.
     x: f64,
     y: f64, // `y` is finite ⇒ `x` is finite
-    cost: f64, // Cache the cost of the point (not the segment)
-    prev: *mut Point,
-    next: *mut Point,
-    witness: Witness<*mut Point>,
+    cost: f64, // Cache the cost of the point (not the segment).  If
+               // the point is not valid, the cost has no meaning.
+    witness: Option<pq::Witness<list::Witness<Point>>>,
+}
+
+impl Clone for Point {
+    // As a cloned point may likely go to another path, reset the
+    // priority queue pointer.
+    fn clone(&self) -> Self {
+        Self { witness: None, .. *self }
+    }
 }
 
 impl Point {
-    /// Return a new point (with no cost, no predecessor and no
-    /// successor).  `t` is assumed to be finite.
+    /// Return a new point.  `t` is assumed to be finite.
     #[inline]
-    fn new(t: f64, x: f64, y: f64) -> Self {
+    fn new_unchecked(t: f64, x: f64, y: f64) -> Self {
         Point { t, x, y,  cost: 0.,
-                prev: ptr::null_mut(),
-                next: ptr::null_mut(),
-                witness: Witness::invalid() }
+                witness: None }
     }
 
     #[inline]
     fn cut(t: f64) -> Self {
         Point { t, x: f64::NAN, y: f64::NAN,
                 cost: 0.,
-                prev: ptr::null_mut(),
-                next: ptr::null_mut(),
-                witness: Witness::invalid() }
+                witness: None }
     }
 
     /// Return `true` if the point is valid — otherwise it is a cut.
     #[inline]
     fn is_valid(&self) -> bool { self.y.is_finite() }
+
 }
 
 /// A 2D sampling.  This can be thought as a path, with possible
@@ -110,24 +115,19 @@ impl Point {
 pub struct Sampling {
     // Priority queue of segments.  The value points to the first
     // `Point` of the segment (thus its .next pointer must not be
-    // null).  If `pq` is empty but `begin` is not null, it means that
-    // the costs need to to be updated.
-    pq: PQ<*mut Point>,
-    head: *mut Point,
-    tail: *mut Point, // tail.is_null() ⇔ head.is_null()
+    // null).  At least one of the endpoint of all segments must be
+    // valid (see `Point::is_valid`) If `pq` is empty but `begin` is
+    // not null, it means that the costs need to to be updated.
+    pq: PQ,
+    path: List<Point>,
     vp: Option<BoundingBox>, // viewport (zone of interest)
 }
 
-impl Drop for Sampling {
-    fn drop(&mut self) {
-        let mut pt_ptr = self.head;
-        while !pt_ptr.is_null() {
-            let pt = unsafe { Box::from_raw(pt_ptr) };
-            pt_ptr = pt.next;
-        }
-    }
-}
+type PQ = pq::PQ<list::Witness<Point>>;
 
+
+/// `t` is the length of total range of time, `x` and `y` are the
+/// dimensions of the bounding box.
 #[derive(Debug, Clone, Copy)]
 struct Lengths {
     t: f64,
@@ -138,70 +138,22 @@ struct Lengths {
 impl Sampling {
     /// Return `true` if the sampling contains no point.
     #[inline]
-    pub fn is_empty(&self) -> bool { self.head.is_null() }
+    pub fn is_empty(&self) -> bool { self.path.is_empty() }
 
     /// Create an empty sampling.
     #[inline]
     pub(crate) fn empty() -> Self {
         Self { pq: PQ::new(),
-               head: ptr::null_mut(),
-               tail: ptr::null_mut(),
+               path: List::new(),
                vp: None }
     }
 
     #[inline]
-    pub(crate) fn singleton(mut p: Point) -> Self {
+    pub(crate) fn singleton(p: Point) -> Self {
         debug_assert!(p.t.is_finite() && p.x.is_finite() && p.y.is_finite());
-        // `p` may be obtained cloning some other point.  Sanitize it.
-        p.prev = ptr::null_mut();
-        p.next = ptr::null_mut();
-        let pt = Box::into_raw(Box::new(p));
-        Self { pq: PQ::new(),
-               head: pt,
-               tail: pt,
-               vp: None }
-    }
-
-    /// Push a new point at the end of the sampling (which the sampling then
-    /// owns).  Does not modify the priority queue.  Does not verify
-    /// that at most 2 cuts can follow each other or that `p.y` is
-    /// finite ⇒ `p.x` is finite.
-    #[inline]
-    pub(crate) fn push_unchecked(&mut self, mut p: Point) {
-        debug_assert!(!p.y.is_finite() || p.x.is_finite());
-        if self.is_empty() {
-            // `p` may be obtained cloning some other point.  Sanitize it.
-            p.prev = ptr::null_mut();
-            p.next = ptr::null_mut();
-            let p = Box::into_raw(Box::new(p));
-            self.head = p;
-            self.tail = p;
-        } else {
-            p.prev = self.tail;
-            p.next = ptr::null_mut();
-            let p = Box::into_raw(Box::new(p));
-            unsafe { (*self.tail).next = p };
-            self.tail = p;
-        }
-    }
-
-    /// Remove the final point (if any) of the path and return it.
-    pub(crate) fn pop(&mut self) -> Option<Point> {
-        if self.tail.is_null() {
-            None
-        } else {
-            let p = unsafe { *Box::from_raw(self.tail) };
-            if p.prev.is_null() {
-                self.head = ptr::null_mut();
-            } else {
-                unsafe { (*p.prev).next = ptr::null_mut() }
-            }
-            self.tail = p.prev;
-            Some(p)
-        }
-    }
-
-        }
+        let mut path = List::new();
+        path.push_back(p);
+        Self { pq: PQ::new(), path, vp: None }
     }
 
     #[inline]
@@ -213,8 +165,8 @@ impl Sampling {
     /// lengths of the viewport.
     pub(crate) fn len_txy(&self) -> Option<Lengths> {
         if self.is_empty() { return None }
-        let p0 = unsafe { &*self.head as &Point };
-        let p1 = unsafe { &*self.tail as &Point };
+        let p0 = self.path.first().unwrap();
+        let p1 = self.path.last().unwrap();
         let len_x;
         let len_y;
         match self.vp {
@@ -230,102 +182,25 @@ impl Sampling {
         Some(Lengths { t: (p1.t - p0.t).abs(), x: len_x, y: len_y })
     }
 
-    /// Iterate on points indices (one output per point).
-    pub(crate) fn iter_points(&self) -> IterPoints<'_> {
-        IterPoints { next: self.head,  marker: PhantomData }
-    }
-
-    /// Iterate on points indices (one output per point).  Also
-    /// returns the priority queue as we may want to mutate it using
-    /// this iterator (which prevents `self.vp` to be borrowed).
-    pub(crate) fn iter_points_mut(&mut self) -> (IterPointsMut<'_>,
-                                                &mut PQ<*mut Point>) {
-        (IterPointsMut { next: self.head,  marker: PhantomData },
-         &mut self.pq)
-    }
-
     /// Iterate on the points (and cuts) of the path.  More
     /// precisely, a path is made of continuous segments whose
     /// points are given by contiguous values `Some(p)`
     /// interspaced by `None`.  Two `None` never follow each
     /// other.  Isolated points `p` are given by ... `None`,
     /// `Some(p)`, `None`,...
-    pub fn iter(&self) -> Iter<'_> {
-        Iter { next: self.head,
-               prev_is_cut: true, // avoid issuing a cut at start
-               marker: PhantomData }
-    }
-}
-
-/// "Raw" mutable iterator on the list of points composing the path.
-struct IterPoints<'a> {
-    next: *mut Point,
-    marker: PhantomData<&'a mut Point>,
-}
-
-impl<'a> Iterator for IterPoints<'a> {
-    type Item = &'a Point;
-
-    fn next(&mut self) -> Option<Self::Item> {
-        if self.next.is_null() { return None }
-        let p = unsafe { &*self.next as &Point };
-        self.next = p.next;
-        Some(p)
-    }
-}
-
-/// "Raw" mutable iterator on the list of points composing the path.
-struct IterPointsMut<'a> {
-    next: *mut Point,
-    marker: PhantomData<&'a mut Point>,
-}
-
-impl<'a> Iterator for IterPointsMut<'a> {
-    type Item = &'a mut Point;
-
-    fn next(&mut self) -> Option<Self::Item> {
-        if self.next.is_null() { return None }
-        let p = unsafe { &mut *self.next as &mut Point };
-        self.next = p.next;
-        Some(p)
-    }
-}
-
-/// Iterator on the points of the [`Sampling`].
-/// See [`Sampling::iter`] for more information.
-pub struct Iter<'a> {
-    next: *const Point,
-    prev_is_cut: bool, // avoid two cuts following each other
-    marker: PhantomData<&'a Point>,
-}
-
-impl<'a> Iterator for Iter<'a> {
-    type Item = Option<[f64; 2]>;
-
-    fn next(&mut self) -> Option<Self::Item> {
-        if self.next.is_null() { return None }
-        let p = unsafe { &*self.next as &Point };
-        self.next = p.next;
-        if p.is_valid() {
-            self.prev_is_cut = false;
-            Some(Some([p.x, p.y]))
-        } else if self.prev_is_cut {
-            // Unroll `self.next()` as tail recursion optimization is
-            // not guaranteed.  There are at most 2 consecutive cuts,
-            // so the next one (if it exists) must be a valid point.
-            if self.next.is_null() { return None }
-            let p = unsafe { &*self.next as &Point };
-            self.next = p.next;
-            debug_assert!(p.is_valid());
-            self.prev_is_cut = false;
-            Some(Some([p.x, p.y]))
-        } else if self.next.is_null() {
-            // Cut but at the end of the path; don't issue it.
-            None
-        } else {
-            self.prev_is_cut = true;
-            Some(None)
-        }
+    pub fn iter<'a>(&'a self) -> impl Iterator<Item=Option<[f64; 2]>> + 'a {
+        let mut prev_is_cut = false;
+        self.path.iter().filter_map(move |p| {
+            if p.is_valid() {
+                prev_is_cut = false;
+                Some(Some([p.x, p.y]))
+            } else if prev_is_cut {
+                // Do not issue several cuts following each other.
+                None
+            } else {
+                prev_is_cut = true;
+                Some(None)
+            }})
     }
 }
 
@@ -366,8 +241,7 @@ impl Sampling {
 
     /// Transpose in place the x and y coordinates of the sampling.
     pub fn transpose(&mut self) -> &mut Self {
-        let (iter, _) = self.iter_points_mut();
-        for p in iter {
+        for p in self.path.iter_mut() {
             swap(&mut p.x, &mut p.y)
         }
         self
@@ -389,9 +263,9 @@ impl Sampling {
         if t <= 1e-14 {
             None
         } else {
-            Some(Point::new(p0.t + t * (p1.t - p0.t),
-                            p0.x + t * dx,
-                            p0.y + t * dy))
+            Some(Point::new_unchecked(p0.t + t * (p1.t - p0.t),
+                                      p0.x + t * dx,
+                                      p0.y + t * dy))
         }
     }
 
@@ -432,17 +306,17 @@ impl Sampling {
         if r1 < t1 { t1 = r1 }
         if t0 < t1 { // segment not reduced to a point
             let dt = p1.t - p0.t;
-            let q0 = Point::new(p0.t + t0 * dt,
-                                p0.x + t0 * dx,
-                                p0.y + t0 * dy);
-            let q1 = Point::new(p0.t + t1 * dt,
-                                p0.x + t1 * dx,
-                                p0.y + t1 * dy);
+            let q0 = Point::new_unchecked(p0.t + t0 * dt,
+                                          p0.x + t0 * dx,
+                                          p0.y + t0 * dy);
+            let q1 = Point::new_unchecked(p0.t + t1 * dt,
+                                          p0.x + t1 * dx,
+                                          p0.y + t1 * dy);
             Intersection::Seg(q0, q1)
         } else if t0 == t1 {
-            let q0 = Point::new(p0.t + t0 * (p1.t - p0.t),
-                                p0.x + t0 * dx,
-                                p0.y + t0 * dy);
+            let q0 = Point::new_unchecked(p0.t + t0 * (p1.t - p0.t),
+                                          p0.x + t0 * dx,
+                                          p0.y + t0 * dy);
             Intersection::Pt(q0)
         } else {
             Intersection::Empty
@@ -461,7 +335,7 @@ impl Sampling {
         let mut p0_opt: Option<&Point> = None;
         let mut p0_inside = false;
         let mut prev_cut = true; // New path ("virtual" cut)
-        for p1 in self.iter_points() {
+        for p1 in self.path.iter() {
             if prev_cut {
                 // A cut was pushed at an earlier step (and the path
                 // has not subsequently intersected `bb`).  This may
@@ -474,37 +348,37 @@ impl Sampling {
                     (Some(p0), true) => {
                         let p1_inside = bb.contains(p1);
                         if p0_inside { // p0 ∈ bb with cut before
-                            s.push_unchecked(p0.clone());
+                            s.path.push_back(p0.clone());
                             if p1_inside {
-                                s.push_unchecked(p1.clone());
+                                s.path.push_back(p1.clone());
                                 prev_cut = false;
                             } else {
                                 if let Some(p) = Self::intersect(p0, p1, bb) {
                                     let t = p.t;
-                                    s.push_unchecked(p);
-                                    s.push_unchecked(Point::cut(t));
+                                    s.path.push_back(p);
+                                    s.path.push_back(Point::cut(t));
                                 } else {
-                                    s.push_unchecked(Point::cut(p0.t));
+                                    s.path.push_back(Point::cut(p0.t));
                                 }
                             }
                         } else if p1_inside { // p0 ∉ bb, p1 ∈ bb
                             if let Some(p) = Self::intersect(p1, p0, bb) {
-                                s.push_unchecked(p); // p ≠ p1
+                                s.path.push_back(p); // p ≠ p1
                             }
-                            s.push_unchecked(p1.clone());
+                            s.path.push_back(p1.clone());
                             prev_cut = false;
                         } else { // p0, p1 ∉ bb but maybe intersection
                             match Self::intersect_seg(p0, p1, bb) {
                                 Intersection::Seg(q0, q1) => {
                                     let t1 = q1.t;
-                                    s.push_unchecked(q0);
-                                    s.push_unchecked(q1);
-                                    s.push_unchecked(Point::cut(t1));
+                                    s.path.push_back(q0);
+                                    s.path.push_back(q1);
+                                    s.path.push_back(Point::cut(t1));
                                 }
                                 Intersection::Pt(p) => {
                                     let t = p.t;
-                                    s.push_unchecked(p);
-                                    s.push_unchecked(Point::cut(t));
+                                    s.path.push_back(p);
+                                    s.path.push_back(Point::cut(t));
                                 }
                                 Intersection::Empty => (),
                             }
@@ -518,8 +392,8 @@ impl Sampling {
                     }
                     (Some(p0), false) => {
                         if p0_inside {
-                            s.push_unchecked(p0.clone());
-                            s.push_unchecked(Point::cut(p0.t));
+                            s.path.push_back(p0.clone());
+                            s.path.push_back(Point::cut(p0.t));
                         }
                         p0_opt = None;
                     }
@@ -535,25 +409,25 @@ impl Sampling {
                     p0_opt = Some(p1);
                     p0_inside = bb.contains(p1); // update for next step
                     if p0_inside { // p0, p1 ∈ bb
-                        s.push_unchecked(p1.clone());
+                        s.path.push_back(p1.clone());
                     } else { // p0 ∈ bb, p1 ∉ bb
                         if let Some(p) = Self::intersect(p0, p1, bb) {
                             let t = p.t;
-                            s.push_unchecked(p);
-                            s.push_unchecked(Point::cut(t));
+                            s.path.push_back(p);
+                            s.path.push_back(Point::cut(t));
                         } else {
-                            s.push_unchecked(Point::cut(p0.t));
+                            s.path.push_back(Point::cut(p0.t));
                         }
                         prev_cut = true;
                     }
                 } else { // p1 is invalid (i.e., represent a cut)
                     p0_opt = None;
-                    s.push_unchecked(p1.clone());
+                    s.path.push_back(p1.clone());
                     prev_cut = true
                 }
             }
         }
-        if prev_cut { s.pop(); }
+        if prev_cut { s.path.pop_back(); }
         s.set_vp(bb);
         s
     }
@@ -566,10 +440,10 @@ impl Sampling {
         let mut s = Sampling::empty();
         for p in points.into_iter() {
             if p.is_valid() {
-                s.push_unchecked(p);
+                s.path.push_back(p);
                 prev_is_cut = false;
             } else if ! prev_is_cut {
-                s.push_unchecked(Point::cut(p.t));
+                s.path.push_back(Point::cut(p.t));
                 prev_is_cut = true;
             }
         }
@@ -578,7 +452,8 @@ impl Sampling {
 
     /// Create a sampling from `points` after sorting them by
     /// increasing (if `incr`) or decreasing (if `! incr`) values of
-    /// the field `t`.
+    /// the field `t`.  Beware that the invariant "`p.y` is finite ⇒
+    /// `p.x` is finite" is not checked.
     fn from_vec(mut points: Vec<Point>, incr: bool) -> Self {
         if incr {
             points.sort_unstable_by(|p1, p2| {
@@ -601,7 +476,7 @@ impl FromIterator<[f64; 2]> for Sampling {
         Sampling::from_point_iterator(
             points.into_iter().enumerate().map(|(i, [x, y])| {
                 let t = i as f64;
-                if x.is_finite() {Point::new(t, x, y)}
+                if x.is_finite() {Point::new_unchecked(t, x, y)}
                 else {Point::cut(t)} }))
     }
 }
@@ -612,16 +487,18 @@ impl FromIterator<[f64; 2]> for Sampling {
 // This is internal to this library.
 
 impl From<(f64, f64)> for Point {
+    #[inline]
     fn from((x, y): (f64, f64)) -> Self {
-        Point::new(x, x, y) // `x` ∈ \[a, b\] by [`init_pt`] checks.
+        Point::new_unchecked(x, x, y) // `x` ∈ [a, b] by `init_pt` checks.
     }
 }
 
 impl From<(f64, [f64; 2])> for Point {
     /// Assume `t` is finite.
+    #[inline]
     fn from((t, [x,y]): (f64, [f64;2])) -> Self {
         // Enforce the invariant: y finite ⟹ x finite
-        if x.is_finite() { Point::new(t, x, y) }
+        if x.is_finite() { Point::new_unchecked(t, x, y) }
         else { Point::cut(t) }
     }
 }
@@ -640,7 +517,7 @@ struct FnPoint<T>(T);
 impl<T> IntoFnPoint for FnPoint<T> where T: FnMut(f64) -> f64 {
     #[inline]
     fn eval(&mut self, t: f64) -> Point {
-        Point::new(t, t, self.0(t))
+        Point::new_unchecked(t, t, self.0(t))
     }
 }
 
@@ -652,8 +529,8 @@ impl<T> IntoFnPoint for ParamPoint<T> where T: FnMut(f64) -> [f64; 2] {
         let [x, y] = self.0(t);
         // `Point::is_valid()` only checks `y`; make sure non-finite
         // `x` leads to an invalid point.
-        if x.is_finite() { Point::new(t, x, y) }
-        else { Point::new(t, x, f64::NAN) }
+        if x.is_finite() { Point::new_unchecked(t, x, y) }
+        else { Point::new_unchecked(t, x, f64::NAN) }
     }
 }
 
@@ -822,7 +699,7 @@ where F: FnMut(f64) -> f64 {
 // Cost
 
 mod cost {
-    use super::{Point, Sampling, Lengths, PQ};
+    use super::{Point, Lengths};
 
     // The cost of a point is a measure of the curvature at this
     // point.  This requires segments before and after the point.  In
@@ -847,13 +724,13 @@ mod cost {
     /// multiplied by a function of `dt` in `segment` so it must be
     /// set high enough to ensure proper resolution of the endpoints
     /// of the domain.
-    const HANGING_NODE: f64 = 5e5;
+    pub const HANGING_NODE: f64 = 5e5;
 
-    /// Return the cost of the middle point `pm`.  Assumes `p0` and
-    /// `p1` are valid points.
+    /// Set the cost of the middle point `pm`.  Assumes `p0`, `pm`,
+    /// and `p1` are valid points.
     #[inline]
-    pub(crate) fn estimate(p0: &Point, pm: &Point, p1: &Point,
-                           len: Lengths) -> f64 {
+    pub(crate) fn set_middle(p0: &Point, pm: &mut Point, p1: &Point,
+                             len: Lengths) {
         let dx0m = (p0.x - pm.x) / len.x;
         let dy0m = (p0.y - pm.y) / len.y;
         let dx1m = (p1.x - pm.x) / len.x;
@@ -861,24 +738,25 @@ mod cost {
         let len0m = dx0m.hypot(dy0m);
         let len1m = dx1m.hypot(dy1m);
         if len0m == 0. || len1m == 0. {
-            f64::NEG_INFINITY // Do not subdivide
+            pm.cost = f64::NEG_INFINITY; // Do not subdivide
         } else {
             let dx = - dx0m * dx1m - dy0m * dy1m;
             let dy = dy0m * dx1m - dx0m * dy1m;
-            dy.atan2(dx) // ∈ [-π, π]
+            pm.cost = dy.atan2(dx); // ∈ [-π, π]
         }
     }
 
+    /// Compute the cost of a segment according to the costs of its
+    /// endpoints unless `in_vp` is false in which case -∞ is returned.
     #[inline]
     pub(crate) fn segment_vp(p0: &Point, p1: &Point, len: Lengths,
-                          in_vp: bool) -> f64 {
+                             in_vp: bool) -> f64 {
         if ! in_vp { return f64::NEG_INFINITY }
         segment(p0, p1, len)
     }
 
     /// Compute the cost of a segment according to the costs of its
-    /// endpoints.  `len_t` is the length of total range of time.
-    /// `len_x` and `len_y` are the dimensions of the bounding box.
+    /// endpoints.
     #[inline]
     pub(crate) fn segment(p0: &Point, p1: &Point, len: Lengths) -> f64 {
         let dt = (p1.t - p0.t) / len.t; // ∈ [0,1]
@@ -902,48 +780,37 @@ mod cost {
         }
     }
 
-    fn push_segment(pq: &mut PQ<*mut Point>, p0: &mut Point, p1: &Point,
-                    len: Lengths, in_vp: bool) {
-        let cost_segment = segment_vp(p0, p1, len, in_vp);
-        // The segment is referred to by its first point.
-        let w = pq.push(cost_segment, p0 as *mut _);
-        p0.witness = w;
-    }
+}
 
-    /// Update the cost of all points in the sampling and add segments
-    /// to the priority queue.
-    pub(crate) fn compute(s: &mut Sampling, in_vp: impl Fn(&Point) -> bool) {
-        if let Some(len) = s.len_txy() {
-            // Path is not empty.
-            let (mut pts, pq) = s.iter_points_mut();
-            let mut p0 = pts.next().unwrap();
-            p0.cost = 0.;
-            let mut p0_in_vp = p0.is_valid() && in_vp(p0);
-            let mut pm = match pts.next() {
-                Some(p) => p,
-                None => return };
-            for p1 in pts {
-                let pm_in_vp;
-                if pm.is_valid() {
-                    pm_in_vp = in_vp(pm);
-                    if p0.is_valid() && p1.is_valid() {
-                        pm.cost = estimate(p0, pm, p1, len);
-                    } else {
-                        pm.cost = HANGING_NODE;
-                    }
-                } else { // pm is the location of a cut
-                    pm_in_vp = false;
-                    pm.cost = 0.;
-                }
-                // Segment [p0, pm]
-                push_segment(pq, p0, pm, len, p0_in_vp || pm_in_vp);
-                p0 = pm;
-                p0_in_vp = pm_in_vp;
-                pm = p1;
-            }
-            pm.cost = 0.; // last point
-            push_segment(pq, p0, pm, len, p0_in_vp || in_vp(pm));
+/// Compute the cost of the segment \[`p0`, `p1`\] (taking into
+/// account `in_vp`) and push it to the queue `pq`.  `p0` is pointed
+/// to by a list-witness so one can update it from the PQ elements.
+/// `p0` is updated with the PQ-witness.
+fn push_segment(pq: &mut PQ,
+                p0: &mut list::Witness<Point>, p1: &Point,
+                len: Lengths, in_vp: bool) {
+    // FIXME: do we really want to push the segment when `!in_vp`?
+    // In not all points are in the queue, one must beware of the
+    // validity of witnesses though.
+    let cost_segment = cost::segment_vp(unsafe { p0.as_ref() },
+                                        p1, len, in_vp);
+    // The segment is referred to by its first point.
+    let w = pq.push(cost_segment, p0.clone());
+    unsafe { p0.as_mut().witness = Some(w) }
+}
+
+/// With the (new) costs in points `p0` and `p1`, update the position
+/// of the segment \[`p0`, `p1`\] in the priority queue of `self`.
+///
+/// # Safety
+/// `p0` must be in `pq`, otherwise it is UB.
+unsafe fn update_segment(pq: &mut PQ, p0: &Point, p1: &Point, len: Lengths) {
+    match &p0.witness {
+        Some(w) => {
+            let priority = cost::segment(p0, p1, len);
+            pq.increase_priority(&w, priority)
         }
+        None => panic!("Sampling::update_segment: unset witness"),
     }
 }
 
@@ -951,12 +818,150 @@ mod cost {
 //
 // Function sampling
 
+/// Update the cost of all points in the sampling and add segments
+/// to the priority queue.
+fn compute(s: &mut Sampling, in_vp: impl Fn(&Point) -> bool) {
+    if let Some(len) = s.len_txy() {
+        macro_rules! r { ($x: ident) => { unsafe { $x.as_ref() } } }
+        macro_rules! m { ($x: ident) => { unsafe { $x.as_mut() } } }
+        // Path is not empty.
+        let mut pts = s.path.iter_witness_mut();
+        let mut p0 = pts.next().unwrap();
+        m!(p0).cost = 0.;
+        let mut p0_in_vp = r!(p0).is_valid() && in_vp(r!(p0));
+        let mut pm = match pts.next() {
+            Some(p) => p,
+            None => return };
+        for p1 in pts {
+            let pm_in_vp;
+            if r!(pm).is_valid() {
+                pm_in_vp = in_vp(r!(pm));
+                if r!(p0).is_valid() && r!(p1).is_valid() {
+                    cost::set_middle(r!(p0), m!(pm), r!(p1), len);
+                } else {
+                    m!(pm).cost = cost::HANGING_NODE;
+                }
+            } else { // pm is the location of a cut
+                pm_in_vp = false;
+                m!(pm).cost = 0.;
+            }
+            // Segment [p0, pm]
+            push_segment(&mut s.pq, &mut p0, r!(pm), len,
+                         p0_in_vp || pm_in_vp);
+            p0 = pm;
+            p0_in_vp = pm_in_vp;
+            pm = p1;
+        }
+        m!(pm).cost = 0.; // last point
+        push_segment(&mut s.pq, &mut p0, r!(pm), len,
+                     p0_in_vp || in_vp(r!(pm)));
+    }
+}
+
 fn refine_gen(s: &mut Sampling, n: usize,
               mut f: impl FnMut(f64) -> Point,
               in_vp: impl Fn(&Point) -> bool) {
-
-}
-
+    let len = match s.len_txy() {
+        Some(txy) => txy,
+        None => return };
+    macro_rules! r { ($x: ident) => { unsafe { $x.as_ref() } } }
+    macro_rules! m { ($x: ident) => { unsafe { $x.as_mut() } } }
+    for _ in 0 .. n {
+        let mut p0: list::Witness<Point> = match s.pq.pop() {
+            None => break,
+            Some(p) => p };
+        let mut p1 = unsafe { p0.next().unwrap() };
+        // Refine the segment [p0, p1] inserting a middle point `pm`.
+        let t = (r!(p0).t + r!(p1).t) * 0.5;
+        let mut pm = f(t);
+        if r!(p0).is_valid() {
+            if r!(p1).is_valid() {
+                let mut pm = unsafe {
+                    s.path.insert_after(&mut p0, pm) };
+                let mut pm_in_vp = false;
+                if r!(pm).is_valid() {
+                    pm_in_vp = in_vp(r!(pm));
+                    cost::set_middle(r!(p0), m!(pm), r!(p1), len);
+                    if let Some(p_1) = unsafe { p0.prev() } {
+                        cost::set_middle(r!(p_1), m!(p0), r!(pm), len);
+                        unsafe {
+                            update_segment(&mut s.pq, p_1.as_ref(),
+                                           p0.as_ref(), len) }
+                    }
+                    if let Some(p2) = unsafe { p1.next() } {
+                        cost::set_middle(r!(pm), m!(p1), r!(p2), len);
+                        unsafe {
+                            update_segment(&mut s.pq, p1.as_ref(),
+                                           p2.as_ref(), len) }
+                    }
+                } else { // `pm` invalid ⟹ cut between `p0` and `p1`
+                    m!(p0).cost = 1.;
+                    m!(pm).cost = 0.;
+                    m!(p1).cost = 1.;
+                    unsafe {
+                        if let Some(p_1) = p0.prev() {
+                            update_segment(&mut s.pq, p_1.as_ref(),
+                                           p0.as_ref(), len)
+                        }
+                        if let Some(p2) = p1.next() {
+                            update_segment(&mut s.pq, p1.as_ref(),
+                                           p2.as_ref(), len);
+                        }
+                    }
+                }
+                let vp = pm_in_vp || in_vp(r!(p0));
+                push_segment(&mut s.pq, &mut p0, r!(pm), len, vp);
+                let vp = pm_in_vp || in_vp(r!(p1));
+                push_segment(&mut s.pq, &mut pm, r!(p1), len, vp);
+            } else { // `p0` valid, `p1` invalid (i.e. is a cut)
+                if pm.is_valid() {
+                    let mut pm = unsafe {
+                        s.path.insert_after(&mut p0, pm) };
+                    m!(pm).cost = cost::HANGING_NODE;
+                    unsafe {
+                        if let Some(p_1) = p0.prev() {
+                            update_segment(&mut s.pq, p_1.as_ref(),
+                                           p0.as_ref(), len)
+                        }
+                    }
+                    let pm_in_vp = in_vp(r!(pm));
+                    let vp = pm_in_vp || in_vp(r!(p0));
+                    push_segment(&mut s.pq, &mut p0, r!(pm), len, vp);
+                    push_segment(&mut s.pq, &mut pm, r!(p1), len, pm_in_vp)
+                } else { // `pm` invalid, replace `p1` by `pm`.
+                    pm.cost = 0.;
+                    let pm = unsafe { s.path.insert_after(&mut p0, pm) };
+                    // Insert only \[`p0`, `pm`\] and forget
+                    // \[`pm`, `p1`\].  The cost of `p0` stays
+                    // `cost::HANGING_NODE`.  We can see this as
+                    // reducing the uncertainty of the boundary in the
+                    // segment \[`p0`, `p1`\].
+                    let vp = in_vp(r!(p0));
+                    push_segment(&mut s.pq, &mut p0, r!(pm), len, vp)
+                }
+            }
+        } else { // `p0` invalid (i.e., cut) ⟹ `p1` valid
+            debug_assert!(m!(p1).is_valid());
+            if pm.is_valid() {
+                pm.cost = cost::HANGING_NODE;
+                let mut pm = unsafe { s.path.insert_after(&mut p0, pm) };
+                unsafe {
+                    if let Some(p2) = p1.next() {
+                        update_segment(&mut s.pq, p1.as_ref(),
+                                       p2.as_ref(), len)
+                    }
+                }
+                let pm_in_vp = in_vp(r!(pm));
+                push_segment(&mut s.pq, &mut p0, r!(pm), len, pm_in_vp);
+                push_segment(&mut s.pq, &mut pm, r!(p1), len,
+                             pm_in_vp || in_vp(r!(p1)))
+            } else { // `pm` invalid ⟹ drop segment \[`p0`, `pm`\].
+                // Cost of `p1` stays `cost::HANGING_NODE`.
+                pm.cost = 0.;
+                let mut pm = unsafe { s.path.insert_after(&mut p0, pm) };
+                let vp = in_vp(r!(p1));
+                push_segment(&mut s.pq, &mut pm, r!(p1), len, vp)
+            }
         }
     }
 }
@@ -996,11 +1001,11 @@ impl Sampling {
         match viewport {
             Some(vp) => {
                 let in_vp = |p: &Point| vp.contains(p);
-                cost::compute(&mut s, in_vp);
+                compute(&mut s, in_vp);
                 refine_gen(&mut s, n - n0, &mut f, in_vp)
             }
             None => {
-                cost::compute(&mut s, |_| true);
+                compute(&mut s, |_| true);
                 refine_gen(&mut s, n - n0, &mut f, |_| true)
             }
         }
@@ -1332,7 +1337,7 @@ mod tests {
     use crate::{Sampling, BoundingBox, Point};
 
     fn xy_of_sampling(s: &Sampling) -> Vec<Option<(f64, f64)>> {
-        s.iter_points().map(|p| {
+        s.path.iter().map(|p| {
             if p.is_valid() { Some((p.x, p.y)) } else { None }})
             .collect()
     }
@@ -1349,7 +1354,8 @@ mod tests {
 
     #[test]
     fn bounding_box_singleton() {
-        let s = Sampling::singleton(Point::new(0., 1., 2.));
+        let s = Sampling::singleton(
+            Point::new_unchecked(0., 1., 2.));
         let bb = BoundingBox {xmin: 1., xmax: 1., ymin: 2., ymax: 2.};
         assert_eq!(s.bounding_box(), bb);
     }
