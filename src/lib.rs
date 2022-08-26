@@ -739,6 +739,7 @@ mod cost {
             let dx = - dx0m * dx1m - dy0m * dy1m;
             let dy = dy0m * dx1m - dx0m * dy1m;
             pm.cost = dy.atan2(dx); // ∈ [-π, π]
+            debug_assert!(!pm.cost.is_nan());
         }
     }
 
@@ -878,13 +879,15 @@ fn refine_gen(s: &mut Sampling, n: usize,
                 if r!(pm).is_valid() {
                     pm_in_vp = in_vp(r!(pm));
                     cost::set_middle(r!(p0), m!(pm), r!(p1), len);
-                    if let Some(p_1) = unsafe { p0.prev() } {
+                    if let Some(p_1) = unsafe { p0.prev() }
+                    && r!(p_1).is_valid() {
                         cost::set_middle(r!(p_1), m!(p0), r!(pm), len);
                         unsafe {
                             update_segment(&mut s.pq, p_1.as_ref(),
                                            p0.as_ref(), len) }
                     }
-                    if let Some(p2) = unsafe { p1.next() } {
+                    if let Some(p2) = unsafe { p1.next() }
+                    && r!(p2).is_valid() {
                         cost::set_middle(r!(pm), m!(p1), r!(p2), len);
                         unsafe {
                             update_segment(&mut s.pq, p1.as_ref(),
