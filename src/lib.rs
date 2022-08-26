@@ -1532,6 +1532,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg_attr(miri, ignore)] // very slow under Miri
     fn horror() -> R<()> {
         let d = Plot {
             xmin: -5., xmax: 5., ymin: -5., ymax: 5., n: 100, init: vec![] };

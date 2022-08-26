@@ -15,7 +15,7 @@ horror:
 	echo "⇒ see target/horror.pdf"
 
 miri:
-	MIRIFLAGS="-Zmiri-disable-isolation -Zmiri-tag-raw-pointers" \
+	MIRIFLAGS="-Zmiri-disable-isolation" \
 	cargo miri test
 
 
