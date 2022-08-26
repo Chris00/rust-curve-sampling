@@ -1514,7 +1514,7 @@ mod tests {
             "unset title\n\
              unset y2tics\n\
              plot [{}:{}] \"{}\" with l lt 5 title \"{}\", \
-             \"{}\" with p lt 1 pt 6 ps 0.2 title \"n={}\"\n\
+             \"{}\" with p lt 3 pt 6 ps 0.2 title \"n={}\"\n\
              set title \"Restricted to viewport [{}:{}]×[{}:{}]\"\n\
              set y2tics\n\
              set y2range [-1e-6:]\n\
