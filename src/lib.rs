@@ -870,11 +870,10 @@ fn refine_gen(s: &mut Sampling, n: usize,
         let mut p1 = unsafe { p0.next().unwrap() };
         // Refine the segment [p0, p1] inserting a middle point `pm`.
         let t = (r!(p0).t + r!(p1).t) * 0.5;
-        let mut pm = f(t);
+        let pm = f(t);
+        let mut pm = unsafe { s.path.insert_after(&mut p0, pm) };
         if r!(p0).is_valid() {
             if r!(p1).is_valid() {
-                let mut pm = unsafe {
-                    s.path.insert_after(&mut p0, pm) };
                 let mut pm_in_vp = false;
                 if r!(pm).is_valid() {
                     pm_in_vp = in_vp(r!(pm));
@@ -915,9 +914,7 @@ fn refine_gen(s: &mut Sampling, n: usize,
                 let vp = pm_in_vp || in_vp(r!(p1));
                 push_segment(&mut s.pq, &mut pm, r!(p1), len, vp);
             } else { // `p0` valid, `p1` invalid (i.e. is a cut)
-                if pm.is_valid() {
-                    let mut pm = unsafe {
-                        s.path.insert_after(&mut p0, pm) };
+                if r!(pm).is_valid() {
                     m!(pm).cost = cost::HANGING_NODE;
                     unsafe {
                         if let Some(p_1) = p0.prev() {
@@ -929,9 +926,8 @@ fn refine_gen(s: &mut Sampling, n: usize,
                     let vp = pm_in_vp || in_vp(r!(p0));
                     push_segment(&mut s.pq, &mut p0, r!(pm), len, vp);
                     push_segment(&mut s.pq, &mut pm, r!(p1), len, pm_in_vp)
-                } else { // `pm` invalid, replace `p1` by `pm`.
-                    pm.cost = 0.;
-                    let pm = unsafe { s.path.insert_after(&mut p0, pm) };
+                } else { // `pm` invalid
+                    m!(pm).cost = 0.;
                     // Insert only \[`p0`, `pm`\] and forget
                     // \[`pm`, `p1`\].  The cost of `p0` stays
                     // `cost::HANGING_NODE`.  We can see this as
@@ -945,7 +941,6 @@ fn refine_gen(s: &mut Sampling, n: usize,
             debug_assert!(m!(p1).is_valid());
             if pm.is_valid() {
                 pm.cost = cost::HANGING_NODE;
-                let mut pm = unsafe { s.path.insert_after(&mut p0, pm) };
                 unsafe {
                     if let Some(p2) = p1.next() {
                         update_segment(&mut s.pq, p1.as_ref(),
@@ -958,8 +953,7 @@ fn refine_gen(s: &mut Sampling, n: usize,
                              pm_in_vp || in_vp(r!(p1)))
             } else { // `pm` invalid ⟹ drop segment \[`p0`, `pm`\].
                 // Cost of `p1` stays `cost::HANGING_NODE`.
-                pm.cost = 0.;
-                let mut pm = unsafe { s.path.insert_after(&mut p0, pm) };
+                m!(pm).cost = 0.;
                 let vp = in_vp(r!(p1));
                 push_segment(&mut s.pq, &mut pm, r!(p1), len, vp)
             }
