@@ -964,12 +964,12 @@ fn refine_gen(s: &mut Sampling, n: usize,
 fn push_almost_uniform_sampling(points: &mut Vec<Point>,
                                 f: &mut impl FnMut(f64) -> Point,
                                 a: f64, b: f64, n: usize) {
-    debug_assert!(n > 1);
-    let dt = (b - a) / (n - 1) as f64;
+    debug_assert!(n >= 4);
+    let dt = (b - a) / (n - 3) as f64;
     let mut rng = rand::thread_rng();
     points.push(f(a));
     points.push(f(a + 0.0625 * dt));
-    for i in 0 .. n.saturating_sub(4) {
+    for i in 1 ..= n - 4 {
         let j = i as f64 + rng.gen::<f64>() * 0.125 - 0.0625;
         points.push(f(a + j * dt));
     }
@@ -991,6 +991,8 @@ impl Sampling {
                 return Sampling::empty()
             }
         }
+        // Uniform sampling requires ≥ 4 points but actually makes no
+        // sense with less than 10 points.
         let n0 = (n / 10).max(10);
         push_almost_uniform_sampling(&mut points, &mut f, a, b, n0);
         let mut s = Sampling::from_vec(points, a < b);
