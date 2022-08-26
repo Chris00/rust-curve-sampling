@@ -921,9 +921,9 @@ fn refine_gen(s: &mut Sampling, n: usize,
                         }
                     }
                 } else { // `pm` invalid ⟹ cut between `p0` and `p1`
-                    m!(p0).cost = 1.;
+                    m!(p0).cost = cost::HANGING_NODE;
                     m!(pm).cost = 0.;
-                    m!(p1).cost = 1.;
+                    m!(p1).cost = cost::HANGING_NODE;
                     unsafe {
                         if let Some(p_1) = p0.prev() {
                             update_segment(&mut s.pq, p_1.as_ref(),
@@ -940,12 +940,14 @@ fn refine_gen(s: &mut Sampling, n: usize,
                 let vp = pm_in_vp || in_vp(r!(p1));
                 push_segment(&mut s.pq, &mut pm, r!(p1), len, vp);
             } else { // `p0` valid, `p1` invalid (i.e. is a cut)
+                // Thus `p0` is a hanging node.
                 if r!(pm).is_valid() {
                     m!(pm).cost = cost::HANGING_NODE;
-                    unsafe {
-                        if let Some(p_1) = p0.prev() {
-                            update_segment(&mut s.pq, p_1.as_ref(),
-                                           p0.as_ref(), len)
+                    if let Some(p_1) = unsafe { p0.prev() } {
+                        if r!(p_1).is_valid() {
+                            cost::set_middle(r!(p_1), m!(p0), r!(pm), len);
+                            unsafe{update_segment(&mut s.pq, p_1.as_ref(),
+                                                  p0.as_ref(), len)}
                         }
                     }
                     let pm_in_vp = in_vp(r!(pm));
@@ -964,13 +966,14 @@ fn refine_gen(s: &mut Sampling, n: usize,
                 }
             }
         } else { // `p0` invalid (i.e., cut) ⟹ `p1` valid
-            debug_assert!(m!(p1).is_valid());
-            if pm.is_valid() {
-                pm.cost = cost::HANGING_NODE;
-                unsafe {
-                    if let Some(p2) = p1.next() {
-                        update_segment(&mut s.pq, p1.as_ref(),
-                                       p2.as_ref(), len)
+            debug_assert!(r!(p1).is_valid());
+            if r!(pm).is_valid() {
+                m!(pm).cost = cost::HANGING_NODE;
+                if let Some(p2) = unsafe { p1.next() } {
+                    if r!(p2).is_valid() {
+                        cost::set_middle(r!(pm), m!(p1), r!(p2), len);
+                        unsafe{update_segment(&mut s.pq, p1.as_ref(),
+                                              p2.as_ref(), len)}
                     }
                 }
                 let pm_in_vp = in_vp(r!(pm));
