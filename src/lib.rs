@@ -701,7 +701,9 @@ mod cost {
     // If it is an endpoint of a segment with the other point a cut,
     // the cost is set to [`HANGING_NODE`] because the segment with
     // the invalid point needs to be cut of too long to better
-    // determine the boundary.
+    // determine the boundary.  Only the absolute value of the cost
+    // matters for the priority queue (see `segment`), its sign must
+    // reflect the orientation of the angle.
     //
     // The cost of a point is apportioned to the segments of which it is
     // an endpoint according to their relative lengths.  More precisely,
@@ -732,7 +734,7 @@ mod cost {
         let len0m = dx0m.hypot(dy0m);
         let len1m = dx1m.hypot(dy1m);
         if len0m == 0. || len1m == 0. {
-            pm.cost = f64::NEG_INFINITY; // Do not subdivide
+            pm.cost = 0.; // Do not subdivide
         } else {
             let dx = - dx0m * dx1m - dy0m * dy1m;
             let dy = dy0m * dx1m - dx0m * dy1m;
