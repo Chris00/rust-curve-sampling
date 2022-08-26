@@ -1,5 +1,3 @@
-#![feature(closure_lifetime_binder)]
-
 use std::{error::Error,
           fs::File,
           io::Write};
