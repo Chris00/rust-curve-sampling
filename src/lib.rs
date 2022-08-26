@@ -893,6 +893,7 @@ fn refine_gen(s: &mut Sampling, n: usize,
         let mut p0: list::Witness<Point> = match s.pq.pop() {
             None => break,
             Some(p) => p };
+        m!(p0).witness = None; // PQ element it points to just popped.
         let mut p1 = unsafe { p0.next().unwrap() };
         // Refine the segment [p0, p1] inserting a middle point `pm`.
         let t = (r!(p0).t + r!(p1).t) * 0.5;
