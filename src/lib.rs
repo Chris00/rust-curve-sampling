@@ -430,15 +430,33 @@ impl Sampling {
     /// invariant "`p.y` is finite ⇒ `p.x` is finite" is not checked.
     fn from_point_iterator<P>(points: P) -> Self
     where P: IntoIterator<Item = Point> {
-        let mut prev_is_cut = true;
         let mut s = Sampling::empty();
-        for p in points.into_iter() {
+        let mut points = points.into_iter();
+        macro_rules! skip_until_last_cut { () => {
+            let mut cut = None;
+            let mut first_pt = None;
+            for p in &mut points {
+                if p.is_valid() { first_pt = Some(p); break; }
+                cut = Some(p);
+            }
+            match (cut, first_pt) {
+                (_, None) => return s,
+                (None, Some(p)) => {
+                    s.path.push_back(p);
+                }
+                (Some(c), Some(p)) => {
+                    s.path.push_back(Point::cut(c.t));
+                    s.path.push_back(p);
+                }
+            }
+        }}
+        skip_until_last_cut!();
+        while let Some(p) = points.next() {
             if p.is_valid() {
                 s.path.push_back(p);
-                prev_is_cut = false;
-            } else if ! prev_is_cut {
+            } else {
                 s.path.push_back(Point::cut(p.t));
-                prev_is_cut = true;
+                skip_until_last_cut!();
             }
         }
         s
