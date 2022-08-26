@@ -77,6 +77,9 @@ struct Point {
     y: f64, // `y` is finite ⇒ `x` is finite
     cost: f64, // Cache the cost of the point (not the segment).  If
                // the point is not valid, the cost has no meaning.
+
+    // Pointer to the priority queue node if the point is the initial
+    // point of a segment.  `None` otherwise.
     witness: Option<pq::Witness<list::Witness<Point>>>,
 }
 
@@ -496,6 +499,8 @@ impl FromIterator<[f64; 2]> for Sampling {
 ////////////////////////////////////////////////////////////////////////
 //
 // Acceptable types & functions that provide "points".
+// These "conversions" must enforce the specification: `p.x` finite ⟹
+// `p.y` finite.
 // This is internal to this library.
 
 impl From<(f64, f64)> for Point {
@@ -1008,7 +1013,7 @@ fn push_almost_uniform_sampling(points: &mut Vec<Point>,
 }
 
 impl Sampling {
-    /// Return a sampling from the initial list of `points`
+    /// Return a sampling from the initial list of `points`.
     fn build(mut points: Vec<Point>,
              mut f: impl FnMut(f64) -> Point,
              a: f64, b: f64, n: usize,
