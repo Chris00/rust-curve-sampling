@@ -1580,10 +1580,11 @@ mod tests {
             p!().plot(|x| 1. / x, "x ↦ 1/x")?, // check singularity
             p!(xmin: 0., xmax: 5., ymax: 100.).plot(
                 |x| 1. / x, "x ↦ 1/x")?, // singularity at starting point
-            p!(xmin: -0.3, xmax: 2., ymin: 0., ymax: 1.6, n: 50).plot(
+            p!(xmin: -0.4, xmax: 2., ymin: 0., ymax: 1.6, n: 50).plot(
                 |x| x.sqrt(), "x ↦ √x")?,
-            p!(xmin: -1., xmax: 2., ymin: 0., ymax: 1.6, n: 50).plot(
-                |x| x.sqrt(), "x ↦ √x")?,
+            // Test cuts also to the right:
+            p!(xmin: -2., xmax: 1., ymin: 0., ymax: 1.6, n: 50).plot(
+                |x| (-x).sqrt(), "x ↦ √(-x)")?,
             p!(n: 200).plot(|x| x.tan(), "tan")?,
             p!().plot(|x| 1. / x.abs(), "x ↦ 1/|x|")?,
             p!(xmin: -6., xmax: 6., ymin: -2., ymax: 2.).plot(

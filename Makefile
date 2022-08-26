@@ -10,7 +10,7 @@ latex:
 	cd /tmp && time pdflatex -interaction=nonstopmode latex_speed > /dev/null
 
 horror:
-	@cargo test --lib -- tests::horror && \
+	@cargo test --lib -- --nocapture tests::horror && \
 	cd target/ && gnuplot horror.gp && \
 	echo "⇒ see target/horror.pdf"
 
