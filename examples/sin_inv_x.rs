@@ -7,20 +7,20 @@ use curve_sampling::Sampling;
 type R = Result<(), Box<dyn Error>>;
 
 fn main() -> R {
-    let mut fh = File::create("/tmp/graphs.gp")?;
+    let mut fh = File::create("/tmp/sin_inv_x.gp")?;
     write!(fh, "set terminal pngcairo\n\
                 set grid\n")?;
     let mut d = 0;
     let mut save = |s: &Sampling, n, title| -> R {
         d += 1;
-        let fname = format!("/tmp/graph{}.dat", d);
+        let fname = format!("/tmp/sin_inv_x{}.dat", d);
         s.write(&mut File::create(&fname)?)?;
-        write!(fh, "set output \"graph{}.png\"\n\
+        write!(fh, "set output \"sin_inv_x{}.png\"\n\
                     plot '{}' with l lt 1 lw 2 title \"{} ({} pts)\"\n",
                d, &fname, title, n)?;
-        write!(fh, "set output \"graph{}_p.png\"\n\
+        write!(fh, "set output \"sin_inv_x{}_p.png\"\n\
                     plot '{}' with l lt 5 lw 2 title \"{}\", \
-                    '{}' with p lt 1 pt 5 ps 0.2 title \"points ({})\"\n",
+                    '{}' with p lt 3 pt 5 ps 0.2 title \"points ({})\"\n",
                d, &fname, title, &fname, n)?;
         Ok(())
     };
