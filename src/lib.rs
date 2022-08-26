@@ -843,15 +843,17 @@ fn compute(s: &mut Sampling, in_vp: impl Fn(&Point) -> bool) {
         let mut pts = s.path.iter_witness_mut();
         let mut p0 = pts.next().unwrap();
         m!(p0).cost = 0.;
-        let mut p0_in_vp = r!(p0).is_valid() && in_vp(r!(p0));
+        let mut p0_is_valid = r!(p0).is_valid();
+        let mut p0_in_vp = p0_is_valid && in_vp(r!(p0));
         let mut pm = match pts.next() {
             Some(p) => p,
             None => return };
         for p1 in pts {
+            let pm_is_valid = r!(pm).is_valid();
             let pm_in_vp;
-            if r!(pm).is_valid() {
+            if pm_is_valid {
                 pm_in_vp = in_vp(r!(pm));
-                if r!(p0).is_valid() && r!(p1).is_valid() {
+                if p0_is_valid && r!(p1).is_valid() {
                     cost::set_middle(r!(p0), m!(pm), r!(p1), len);
                 } else {
                     m!(pm).cost = cost::HANGING_NODE;
@@ -860,16 +862,22 @@ fn compute(s: &mut Sampling, in_vp: impl Fn(&Point) -> bool) {
                 pm_in_vp = false;
                 m!(pm).cost = 0.;
             }
-            // Segment [p0, pm]
-            push_segment(&mut s.pq, &mut p0, r!(pm), len,
-                         p0_in_vp || pm_in_vp);
+            if p0_is_valid || pm_is_valid {
+                // Add segment [p0, pm] to the PQ and set `p0` witness.
+                push_segment(&mut s.pq, &mut p0, r!(pm), len,
+                             p0_in_vp || pm_in_vp);
+            }
             p0 = pm;
+            p0_is_valid = pm_is_valid;
             p0_in_vp = pm_in_vp;
             pm = p1;
         }
         m!(pm).cost = 0.; // last point
-        push_segment(&mut s.pq, &mut p0, r!(pm), len,
-                     p0_in_vp || in_vp(r!(pm)));
+        if p0_is_valid || r!(pm).is_valid() {
+            let mut vp = p0_in_vp;
+            if r!(pm).is_valid() { vp = vp || in_vp(r!(pm)) };
+            push_segment(&mut s.pq, &mut p0, r!(pm), len, vp);
+        }
     }
 }
 
