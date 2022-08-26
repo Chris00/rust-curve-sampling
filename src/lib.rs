@@ -1334,7 +1334,12 @@ impl Display for Sampling {
 
 #[cfg(test)]
 mod tests {
+    use std::{error::Error,
+              fs::File,
+              io::Write, path::Path};
     use crate::{Sampling, BoundingBox, Point};
+
+    type R<T> = Result<T, Box<dyn Error>>;
 
     fn xy_of_sampling(s: &Sampling) -> Vec<Option<(f64, f64)>> {
         s.path.iter().map(|p| {
@@ -1442,4 +1447,173 @@ mod tests {
                    vec![Some((0.,2.)), Some((2., 2f64.sqrt())),
                         Some((4., 0.)), None]);
     }
+
+    /// In order the judge the quality of the sampling, we save it
+    /// with the internal cost data.
+    fn write_with_point_costs(s: &Sampling, fname: impl AsRef<Path>) -> R<()> {
+        let mut fh = File::create(fname)?;
+        for p in s.path.iter() {
+            if p.is_valid() {
+                writeln!(fh, "{} {} {}", p.x, p.y, p.cost)?;
+            } else {
+                writeln!(fh)?;
+            }
+        }
+        Ok(())
+    }
+
+    fn write_segments(mut s: Sampling, fname: impl AsRef<Path>) -> R<()> {
+        let mut fh = File::create(fname)?;
+        let mut seg: Vec<(f64, Point, Point, f64)> = vec![];
+        loop {
+            let priority = s.pq.max_priority();
+            if let Some(p0) = s.pq.pop() {
+                let p1 = unsafe { p0.next().unwrap() };
+                let p1 = unsafe { p1.as_ref() };
+                let p0 = unsafe { p0.as_ref() };
+                let tm = (p0.t + p1.t) / 2.;
+                seg.push((tm, p0.clone(), p1.clone(), priority))
+            } else {
+                break;
+            }
+        }
+        seg.sort_by(|(t1,_,_,_), (t2,_,_,_)| t1.partial_cmp(t2).unwrap());
+        for (tm, p0, p1, priority) in seg {
+            writeln!(fh, "{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}",
+                     tm, p0.t, p0.x, p0.y,  p1.t, p1.x, p1.y, priority)?;
+        }
+        Ok(())
+    }
+
+    #[derive(Clone)]
+    struct Plot {
+        xmin: f64,  xmax: f64,
+        ymin: f64,  ymax: f64,
+        n: usize,
+        init: Vec<f64>,
+    }
+
+    impl Plot {
+        /// Return the Gnuplot instructions to plot the data.
+        fn plot<F>(&self, f: F, title: &str) -> R<String>
+        where F: FnMut(f64) -> f64 {
+            let vp = BoundingBox { xmin: self.xmin, xmax: self.xmax,
+                                   ymin: self.ymin, ymax: self.ymax };
+            let s = Sampling::fun(f, self.xmin, self.xmax)
+                .n(self.n).init(self.init.iter()).viewport(vp).build();
+            static mut NDAT: usize = 0;
+            let ndat = unsafe { NDAT += 1;  NDAT };
+            let dir = Path::new("target");
+            let fname = format!("horror{}.dat", ndat);
+            s.write(&mut File::create(dir.join(&fname))?)?;
+            let fname_p = format!("horror{}_p.dat", ndat);
+            write_with_point_costs(&s, dir.join(&fname_p))?;
+            let fname_s = format!("horror{}_s.dat", ndat);
+            write_segments(s, dir.join(&fname_s))?;
+        Ok(format!(
+            "unset title\n\
+             unset y2tics\n\
+             plot [{}:{}] \"{}\" with l lt 5 title \"{}\", \
+             \"{}\" with p lt 1 pt 6 ps 0.2 title \"n={}\"\n\
+             set title \"Restricted to viewport [{}:{}]×[{}:{}]\"\n\
+             set y2tics\n\
+             set y2range [-1e-6:]\n\
+             plot [{}:{}] [{}:{}] \"{}\" with l lt 5 title \"{}\", \
+             \"{}\" with p lt 3 pt 7 ps 0.2 title \"n={}\", \
+             \"{}\" using 1:3  with lp ps 0.2 lt rgb \"#760b0b\" \
+             title \"cost points\", \
+             \"{}\" using 1:8 with lp ps 0.2 lt rgb \"#909090\" \
+             axes x1y2 title \"cost segments\"\n",
+            self.xmin, self.xmax, &fname, title, &fname, self.n,
+            self.xmin, self.xmax, self.ymin, self.ymax,
+            self.xmin, self.xmax, self.ymin, self.ymax, &fname, title,
+            &fname, self.n, &fname_p, &fname_s))
+        }
+    }
+
+    #[test]
+    fn horror() -> R<()> {
+        let d = Plot {
+            xmin: -5., xmax: 5., ymin: -5., ymax: 5., n: 100, init: vec![] };
+        macro_rules! p {
+            ($($id:ident $l:tt $e:expr),*) => {
+                Plot{ $($id: $e,)* ..d.clone() } };
+        }
+        let s = [
+            p!(n: 10).plot(|_| 2., "x ↦ 2")?,
+            p!().plot(|x| x, "x ↦ x")?,
+            p!().plot(|x| 5. * x, "x ↦ 5x")?,
+            p!().plot(|x| 1e6 * x, "x ↦ 10⁶ x")?, // high slope
+            p!().plot(|x| 1e50 * x, "x ↦ 10⁵⁰ x")?, // high slope
+            p!().plot(|x| 1. / x, "x ↦ 1/x")?, // check singularity
+            p!(xmin: 0., xmax: 5., ymax: 100.).plot(
+                |x| 1. / x, "x ↦ 1/x")?, // singularity at starting point
+            p!(xmin: -0.3, xmax: 2., ymin: 0., ymax: 1.6, n: 50).plot(
+                |x| x.sqrt(), "x ↦ √x")?,
+            p!(xmin: -1., xmax: 2., ymin: 0., ymax: 1.6, n: 50).plot(
+                |x| x.sqrt(), "x ↦ √x")?,
+            p!(n: 200).plot(|x| x.tan(), "tan")?,
+            p!().plot(|x| 1. / x.abs(), "x ↦ 1/|x|")?,
+            p!(xmin: -6., xmax: 6., ymin: -2., ymax: 2.).plot(
+                |x| (1. + x.cos().sin()).ln(), "1 + sin(cos x)")?,
+            p!(xmin: 0., xmax: 6.28, ymin: -1.5, ymax: 1.5, n: 400).plot(
+                |x| x.powi(3).sin() + x.powi(3).cos(), "sin x³ + cos x³")?,
+            p!(xmin: -5., xmax:200., ymin: -1., ymax: 1., n: 400).plot(
+                |x| x.sin(), "sin")?,
+            // Examples from R. Avitzur, O. Bachmann, N. Kajler, "From
+            // Honest to Intelligent Plotting", proceedings of ISSAC'
+            // 95, pages 32-41, July 1995.
+            p!(xmin: -4., xmax: 4., ymin: -1., ymax: 1.).plot(
+                |x| (300. * x).sin(), "sin(300 x)")?,
+            p!(xmin: -4., xmax: 4., ymin: -1., ymax: 1., n: 1000).plot(
+                |x| (300. * x).sin(), "sin(300 x)")?,
+            p!(xmin: -2., xmax: 2., ymin: 0., ymax: 3.).plot(
+                |x| 1. + x * x + 0.0125 * (1. - 3. * (x - 1.)).abs().ln(),
+                "1 + x² + 0.0125 ln|1 - 3(x-1)|")?,
+            p!(xmin: -2., xmax: 2., ymin: 0., ymax: 3., n: 300,
+               init:vec![4. / 3.]).plot(
+                |x| 1. + x * x + 0.0125 * (1. - 3. * (x - 1.)).abs().ln(),
+                "1 + x² + 0.0125 ln|1 - 3(x-1)| (specifying x:4/3")?,
+            p!(xmin: -0.5, xmax: 0.5, ymin: -1., ymax: 1.).plot(
+                |x| x * (1. / x).sin(), "x sin(1/x)")?,
+            p!(xmin: -0.5, xmax: 0.5, ymin: -1., ymax: 1., n:200).plot(
+                |x| x * (1. / x).sin(), "x sin(1/x)")?,
+            p!(xmin: -2., xmax: 2., ymin: -1., ymax: 1.).plot(
+                |x| (1. / x).sin(), "sin(1/x)")?,
+            p!(xmin: -2., xmax: 2., ymin: -1., ymax: 1., n: 400).plot(
+                |x| (1. / x).sin(), "sin(1/x)")?,
+            p!(xmin: -4., xmax: 4., ymin: -1., ymax: 1.).plot(
+                |x| x.powi(4).sin(), "sin(x⁴)")?,
+            p!(xmin: -4., xmax: 4., ymin: -1., ymax: 1., n: 600).plot(
+                |x| x.powi(4).sin(), "sin(x⁴)")?,
+            p!(xmin: -6., xmax: 6., ymin: -1., ymax: 1.).plot(
+                |x| x.exp().sin(), "sin(exp x)")?,
+            p!(xmin: -6., xmax: 6., ymin: -1., ymax: 1., n: 500).plot(
+                |x| x.exp().sin(), "sin(exp x)")?,
+            p!(xmin: -10., xmax: 10., ymin: 0., ymax: 10.).plot(
+                |x| 1. / x.sin(), "1 / sin x")?,
+            p!(xmin: -6., xmax: 6., ymin: 0., ymax: 2.).plot(
+                |x| x.sin() / x, "(sin x)/x")?,
+            p!(xmin: -2., xmax: 2., ymin: -15., ymax: 15.).plot(
+                |x| (x.powi(3) - x + 1.).tan() + 1. / (x + 3. * x.exp()),
+                "tan(x³ - x + 1) + 1/(x + 3 eˣ)")?,
+            p!(xmin: 0., xmax: 17., ymin: 0., ymax: 2.).plot(
+                |x| (1. + x.cos()) * (-0.1 * x).exp(),
+                "(1 + cos x) exp(-x/10)")?,
+            p!(xmin: -2., xmax: 17., ymin: 0., ymax: 2.).plot(
+                |x| (1. + x.cos()) * (-0.1 * x).exp(),
+                "(1 + cos x) exp(-x/10)")?,
+            p!(xmin: 0., xmax: 17., ymin: 0., ymax: 2.).plot(
+                |x| (1. + x.cos()) * (-0.01 * x * x).exp(),
+                "(1 + cos x) exp(-x²/100)")?,
+        ].join("");
+        let mut fh = File::create("target/horror.gp")?;
+        write!(fh, "set terminal pdfcairo\n\
+                    set output \"horror.pdf\"\n\
+                    set grid\n\
+                    {}\n", s)?;
+        Ok(())
+    }
+
+
 }

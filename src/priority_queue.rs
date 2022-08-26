@@ -140,6 +140,14 @@ impl<T> PQ<T> {
     // #[inline]
     // pub fn is_empty(&self) -> bool { self.root.is_none() }
 
+    #[cfg(test)]
+    pub fn max_priority(&self) -> f64 {
+        match self.root {
+            Some(root) => unsafe { root.as_ref().priority.0 },
+            None => f64::NAN
+        }
+    }
+
     /// Push a node to a tree.
     ///
     /// # Invariant
