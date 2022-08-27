@@ -1,4 +1,24 @@
+//! This module provide a collection of routines to perform adaptive
+//! sampling of curves as well as manipulating those samplings.
 //!
+//! As of now, the following is available:
+//! - uniform sampling of the graph of functions ℝ → ℝ
+//!   (see [`Sampling::uniform`]);
+//! - adaptive sampling of the graph functions ℝ → ℝ
+//!   (see [`Sampling::fun`]);
+//! - adaptive sampling of the image functions ℝ → ℝ²
+//!   (see [`Sampling::param`]).
+//!
+//! Samplings can be saved as a list of coordinates x-y, one point per
+//! line with blank lines to indicate that the path is interrupted,
+//! with [`Sampling::write`].  They can also be saved in a format
+//! usable from the [LaTeX][] package [TikZ][] using
+//! [`Sampling::latex`].  This format allows to add arrows to the
+//! curves to indicate their orientation.
+//!
+//! [LaTeX]: https://www.latex-project.org/
+//! [TikZ]: https://tikz.dev/
+
 
 use std::{fmt::{self, Display, Formatter},
           io::{self, Write},
@@ -684,7 +704,8 @@ new_sampling_fn!(
     /// # Ok(()) }
     /// ```
     uniform -> f64,
-    /// Uniform sampling options.  See [`Sampling::uniform`].
+    /// Options for uniform sampling graphs of function ℝ → ℝ.
+    /// See [`Sampling::uniform`].
     Uniform,
     FnPoint);
 
@@ -1085,7 +1106,8 @@ new_sampling_fn!(
     /// # Ok(()) }
     /// ```
     fun -> f64,
-    /// Options for sampling a function ℝ → ℝ.  See [`Sampling::fun`].
+    /// Options for sampling graphs of functions ℝ → ℝ.
+    /// See [`Sampling::fun`].
     Fun,
     FnPoint);
 
@@ -1115,7 +1137,8 @@ new_sampling_fn!(
     /// # Ok(()) }
     /// ```
     param -> [f64; 2],
-    /// Options for sampling a function ℝ → ℝ.  See [`Sampling::param`].
+    /// Options for sampling the image of functions ℝ → ℝ².
+    /// See [`Sampling::param`].
     Param,
     ParamPoint);
 
@@ -1134,7 +1157,7 @@ where F: FnMut(f64) -> [f64; 2] {
 //
 // Output
 
-/// LaTeX output.
+/// LaTeX output, created by [`Sampling::latex`].
 ///
 /// # Example
 ///
@@ -1325,7 +1348,7 @@ impl<'a> LaTeX<'a> {
 
     /// Write the sampling to the formatter as PGF/TikZ commands.
     pub fn write(&self, f: &mut impl Write) -> Result<(), io::Error> {
-        writeln!(f, "% Written by the Rust curve_sampling crate.")?;
+        writeln!(f, "% Written by the Rust curve-sampling crate.")?;
         writeln!(f, "\\begin{{pgfscope}}")?;
         if let Some(RGB8 {r, g, b}) = self.color {
             write!(f, "\\definecolor{{RustCurveSamplingColor}}{{RGB}}\
