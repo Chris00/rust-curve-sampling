@@ -1,5 +1,6 @@
 *.org
 /target
+auto/
 Cargo.lock
 biblio
 examples/*.png
