@@ -94,6 +94,14 @@ impl<T> List<T> {
         Witness { node }
     }
 
+    /// Replace the item in the list pointed to by `w`.
+    ///
+    /// # Safety
+    /// The node pointed by `w` must be in the list `self`.
+    pub unsafe fn replace(&mut self, w: &mut Witness<T>, item: T) {
+        w.node.as_mut().item = item
+    }
+
     /// Insert `item` after the position in `self` pointed to by `w`.
     /// Return a witness to the new list entry.
     ///
@@ -367,6 +375,17 @@ mod test {
         unsafe { l.insert_after(&mut w1, "e"); }
         let v: Vec<_> = l.iter_mut().collect();
         assert_eq!(v, vec![&"a", &"d", &"e", &"b"]);
+    }
+
+    #[test]
+    fn replace() {
+        let mut l = List::new();
+        l.push_back("a");
+        let mut w = l.push_back("b");
+        l.push_back("c");
+        unsafe { l.replace(&mut w, "d"); }
+        let v: Vec<_> = l.iter().collect();
+        assert_eq!(v, vec![&"a", &"d", &"c"])
     }
 
 }
