@@ -19,7 +19,6 @@
 //! [LaTeX]: https://www.latex-project.org/
 //! [TikZ]: https://tikz.dev/
 
-
 use std::{fmt::{self, Display, Formatter},
           io::{self, Write},
           iter::Iterator,

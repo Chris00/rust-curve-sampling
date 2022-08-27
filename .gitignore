@@ -1,3 +1,4 @@
+*.org
 /target
 Cargo.lock
 biblio
