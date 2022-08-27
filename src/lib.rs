@@ -695,11 +695,11 @@ new_sampling_fn!(
     /// # Example
     ///
     /// ```
-    /// use std::fs::File;
+    /// use std::{fs::File, io::BufWriter};
     /// use curve_sampling::Sampling;
     /// # fn main() -> Result<(), Box<dyn std::error::Error>> {
     /// let s = Sampling::uniform(|x| x.sin(), 0., 4.).build();
-    /// s.write(&mut File::create("target/uniform.dat")?)?;
+    /// s.write(&mut BufWriter::new(File::create("target/uniform.dat")?))?;
     /// # Ok(()) }
     /// ```
     uniform -> f64,
@@ -1097,11 +1097,11 @@ new_sampling_fn!(
     /// # Example
     ///
     /// ```
-    /// use std::fs::File;
+    /// use std::{fs::File, io::BufWriter};
     /// use curve_sampling::Sampling;
     /// # fn main() -> Result<(), Box<dyn std::error::Error>> {
     /// let s = Sampling::fun(|x| x.sin(), 0., 4.).build();
-    /// s.write(&mut File::create("target/fun.dat")?)?;
+    /// s.write(&mut BufWriter::new(File::create("target/fun.dat")?))?;
     /// # Ok(()) }
     /// ```
     fun -> f64,
@@ -1128,11 +1128,11 @@ new_sampling_fn!(
     /// # Example
     ///
     /// ```
-    /// use std::fs::File;
+    /// use std::{fs::File, io::BufWriter};
     /// use curve_sampling::Sampling;
     /// # fn main() -> Result<(), Box<dyn std::error::Error>> {
     /// let s = Sampling::param(|t| [t.sin(), t.cos()], 0., 4.).build();
-    /// s.write(&mut File::create("target/param.dat")?)?;
+    /// s.write(&mut BufWriter::new(File::create("target/param.dat")?))?;
     /// # Ok(()) }
     /// ```
     param -> [f64; 2],
