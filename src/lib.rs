@@ -23,7 +23,6 @@ use std::{fmt::{self, Display, Formatter},
           io::{self, Write},
           iter::Iterator,
           mem::swap};
-use rand::prelude::*;
 use rgb::*;
 
 mod priority_queue;
@@ -1044,11 +1043,22 @@ fn push_almost_uniform_sampling(points: &mut Vec<Point>,
                                 a: f64, b: f64, n: usize) {
     debug_assert!(n >= 4);
     let dt = (b - a) / (n - 3) as f64;
-    let mut rng = rand::thread_rng();
+    // Pseudorandom number generator from the "Xorshift RNGs" paper by
+    // George Marsaglia.
+    // See https://matklad.github.io/2023/01/04/on-random-numbers.html and
+    // https://github.com/rust-lang/rust/blob/1.55.0/library/core/src/slice/sort.rs#L559-L573
+    let mut random = (n as u32).wrapping_mul(1_000_000);
+    const NORMALIZE_01: f64 = 1. / u32::MAX as f64;
+    let mut rand = move || {
+        random ^= random << 13;
+        random ^= random >> 17;
+        random ^= random << 5;
+        random as f64 * NORMALIZE_01
+    };
     points.push(f(a));
     points.push(f(a + 0.0625 * dt));
     for i in 1 ..= n - 4 {
-        let j = i as f64 + rng.gen::<f64>() * 0.125 - 0.0625;
+        let j = i as f64 + rand() * 0.125 - 0.0625;
         points.push(f(a + j * dt));
     }
     points.push(f(b - 0.0625 * dt));

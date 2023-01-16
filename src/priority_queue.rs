@@ -283,7 +283,6 @@ impl<T> PQ<T> {
 #[cfg(test)]
 mod test {
     use super::PQ;
-    use rand::prelude::*;
 
     #[test]
     fn basic() {
@@ -328,9 +327,17 @@ mod test {
     fn random_priority() {
         let n0 = 100;
         let mut q = PQ::new();
-        let mut rng = rand::thread_rng();
+        // Pseudo-random priorities
+        let mut random = 1000;
+        const NORMALIZE_01: f64 = 1. / u32::MAX as f64;
+        let mut rand = move || {
+            random ^= random << 13;
+            random ^= random >> 17;
+            random ^= random << 5;
+            random as f64 * NORMALIZE_01
+        };
         for _ in 0 .. n0 {
-            q.push(rng.gen::<f64>(), "a");
+            q.push(rand(), "a");
         }
         let mut n = 0;
         while q.pop().is_some() { n += 1 }

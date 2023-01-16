@@ -14,5 +14,4 @@ categories = ["mathematics", "science"]
 exclude = [".github", "auto/"]
 
 [dependencies]
-rand = "0.8.5"
 rgb = "0.8.32"
