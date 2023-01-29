@@ -203,24 +203,24 @@ impl Sampling {
         Some(Lengths { t: (p1.t - p0.t).abs(), x: len_x, y: len_y })
     }
 
-    /// Iterate on the points (and cuts) of the path.  More
-    /// precisely, a path is made of continuous segments whose
-    /// points are given by contiguous values `Some(p)`
-    /// interspaced by `None`.  Two `None` never follow each
-    /// other.  Isolated points `p` are given by ... `None`,
-    /// `Some(p)`, `None`,...
-    pub fn iter(&self) -> impl Iterator<Item=Option<[f64; 2]>> + '_ {
+    /// Iterate on the points (and cuts) of the path.  More precisely,
+    /// a path is made of continuous segments whose points are given
+    /// by contiguous values `[x,y]` with both `x` and `y` not NaN,
+    /// interspaced by "cuts" `[f64::NAN; 2]`.  Two cuts never follow
+    /// each other.  Isolated points `p` are given by ... `[f64::NAN;
+    /// 2]`, `p`, `None`,...
+    pub fn iter(&self) -> impl Iterator<Item = [f64; 2]> + '_ {
         let mut prev_is_cut = false;
         self.path.iter().filter_map(move |p| {
             if p.is_valid() {
                 prev_is_cut = false;
-                Some(Some([p.x, p.y]))
+                Some([p.x, p.y])
             } else if prev_is_cut {
                 // Do not issue several cuts following each other.
-                None
+               None
             } else {
                 prev_is_cut = true;
-                Some(None)
+                Some([f64::NAN; 2])
             }})
     }
 }
@@ -239,14 +239,13 @@ impl Sampling {
     /// sampling `self`.  If the path is empty, the "min" fields of
     /// the bounding box are set to +∞ and "max" fields to -∞.
     pub fn bounding_box(&self) -> BoundingBox {
-        let mut points = self.iter().skip_while(|p| p.is_none());
+        let mut points = self.iter().skip_while(|[x,_]| x.is_nan());
         let mut bb = match &points.next() {
-            Some(Some([x, y])) => BoundingBox { xmin: *x,  xmax: *x,
-                                               ymin: *y,  ymax: *y },
-            Some(None) => unreachable!(),
+            Some([x, y]) => BoundingBox { xmin: *x,  xmax: *x,
+                                         ymin: *y,  ymax: *y },
             None => return BoundingBox::empty()
         };
-        for [x, y] in points.flatten() {
+        for [x, y] in points {
             if x < bb.xmin { bb.xmin = x }
             else if bb.xmax < x { bb.xmax = x };
             if y < bb.ymin { bb.ymin = y }
@@ -1232,8 +1231,12 @@ impl<'a> LaTeX<'a> {
     fn write_with_lines(&self, f: &mut impl Write) -> Result<(), io::Error> {
         let mut n = 0;
         let mut new_path = true;
-        for p in self.sampling.iter() { match p {
-            Some([x, y]) => {
+        for [x,y] in self.sampling.iter() {
+            if x.is_nan() {
+                writeln!(f, "\\pgfusepath{{stroke}}")?;
+                n = 0;
+                new_path = true;
+            } else {
                 n += 1;
                 if new_path {
                     writeln!(f, "\\pgfpathmoveto{{\\pgfpointxy\
@@ -1251,12 +1254,7 @@ impl<'a> LaTeX<'a> {
                 }
                 new_path = false;
             }
-            None =>  {
-                writeln!(f, "\\pgfusepath{{stroke}}")?;
-                n = 0;
-                new_path = true;
-            }
-        }}
+        }
         Ok(())
     }
 
@@ -1267,27 +1265,30 @@ impl<'a> LaTeX<'a> {
         let mut lens = vec![];
         let mut prev_pt: Option<[f64; 2]> = None;
         let mut cur_len = 0.;
-        for p in self.sampling.iter() { match p {
-            Some([x, y]) => {
-                if let Some([x0, y0]) = prev_pt {
-                    cur_len += (x - x0).hypot(y - y0);
-                }
-                prev_pt = p;
-            }
-            None => {
+        for p @ [x, y] in self.sampling.iter() {
+            if x.is_nan() {
                 lens.push(arrow_pos * cur_len);
                 prev_pt = None;
                 cur_len = 0.;
+            } else {
+                if let Some([x0, y0]) = prev_pt {
+                    cur_len += (x - x0).hypot(y - y0);
+                }
+                prev_pt = Some(p);
             }
-        }}
+        }
         lens.push(arrow_pos * cur_len);
         if lens.is_empty() { return Ok(()) }
         let mut lens = lens.iter();
         let mut rem_len = *lens.next().unwrap(); // remaining before arrow
         prev_pt = None;
         let mut n = 0;
-        for p in self.sampling.iter() { match p {
-            Some([x, y]) => {
+        for p @ [x, y] in self.sampling.iter() {
+            if x.is_nan() {
+                writeln!(f, "\\pgfusepath{{stroke}}")?;
+                rem_len = *lens.next().unwrap();
+                prev_pt = None;
+            } else {
                 n += 1;
                 if let Some([x0, y0]) = prev_pt {
                     let dx = x - x0;
@@ -1344,14 +1345,9 @@ impl<'a> LaTeX<'a> {
                     writeln!(f, "\\pgfpathmoveto{{\\pgfpointxy\
                                  {{{:.16}}}{{{:.16}}}}}", x, y)?
                 }
-                prev_pt = p;
+                prev_pt = Some(p);
             }
-            None => {
-                writeln!(f, "\\pgfusepath{{stroke}}")?;
-                rem_len = *lens.next().unwrap();
-                prev_pt = None;
-            }
-        }}
+        }
         Ok(())
     }
 
@@ -1388,10 +1384,11 @@ impl Sampling {
     /// If the path is interrupted, a blank line is printed.  This
     /// format is compatible with Gnuplot.
     pub fn write(&self, f: &mut impl Write) -> Result<(), io::Error> {
-        for p in self.iter() {
-            match p {
-                Some([x, y]) => writeln!(f, "{:e} {:e}", x, y)?,
-                None => writeln!(f)?,
+        for [x, y] in self.iter() {
+            if x.is_nan() {
+                writeln!(f)?
+            } else {
+                writeln!(f, "{:e} {:e}", x, y)?
             }
         }
         Ok(())
@@ -1404,10 +1401,11 @@ impl Display for Sampling {
     /// path is interrupted, a blank line is printed.  This format is
     /// compatible with Gnuplot.
     fn fmt(&self, f: &mut Formatter<'_>) -> Result<(), fmt::Error> {
-        for p in self.iter() {
-            match p {
-                Some([x, y]) => writeln!(f, "{:e} {:e}", x, y)?,
-                None => writeln!(f)?,
+        for [x, y] in self.iter() {
+            if x.is_nan() {
+                writeln!(f)?
+            } else {
+                writeln!(f, "{:e} {:e}", x, y)?
             }
         }
         Ok(())
