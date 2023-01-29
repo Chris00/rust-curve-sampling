@@ -27,8 +27,18 @@ impl<T> Drop for List<T> {
         }
     }
 }
-// FIXME: impl Copy for List (need to duplicate all points).
-// Then, `clip` may eat the original sampling ??
+
+impl<T: Clone> Clone for List<T> {
+    // Now, `clip` may eat the original sampling ??
+    fn clone(&self) -> Self {
+        // Duplicate all nodes (including their data) of the list.
+        let mut l = Self::new();
+        for x in self.iter() {
+            l.push_back(x.clone());
+        }
+        l
+    }
+}
 
 /// Pointer to a node.
 #[derive(Debug)]

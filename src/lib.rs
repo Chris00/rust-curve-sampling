@@ -146,6 +146,15 @@ pub struct Sampling {
 
 type PQ = pq::PQ<list::Witness<Point>>;
 
+impl Clone for Sampling {
+    fn clone(&self) -> Self {
+        // It is guessed that one clones the sampling to transform it.
+        // Thus start with an empty queue.
+        Self { pq: PQ::new(),
+               path: self.path.clone(),
+               vp: self.vp }
+    }
+}
 
 /// `t` is the length of total range of time, `x` and `y` are the
 /// dimensions of the bounding box.
@@ -1429,6 +1438,14 @@ mod tests {
         s.path.iter().map(|p| {
             if p.is_valid() { Some((p.x, p.y)) } else { None }})
             .collect()
+    }
+
+    #[test]
+    fn clone_sampling() {
+        let s = Sampling::from_iter([[0.,0.], [1.,1.]]);
+        let xy0: Vec<_> = s.iter().collect();
+        let xy1: Vec<_> = s.clone().iter().collect();
+        assert_eq!(xy0, xy1)
     }
 
     #[test]
