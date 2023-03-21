@@ -232,6 +232,20 @@ impl Sampling {
                 Some([f64::NAN; 2])
             }})
     }
+
+    /// Iterator on the x-coordinates of the sampling.
+    /// See [`Self::iter`] for more information.
+    #[inline]
+    pub fn x(&self) -> impl Iterator<Item = f64> + '_ {
+        self.iter().map(|[x, _]| x)
+    }
+
+    /// Iterator on the y-coordinates of the sampling.
+    /// See [`Self::iter`] for more information.
+    #[inline]
+    pub fn y(&self) -> impl Iterator<Item = f64> + '_ {
+        self.iter().map(|[_, y]| y)
+    }
 }
 
 
