@@ -81,6 +81,19 @@ impl<T> Node<T> {
         }
     }
 
+    fn forall(mut node: NonNull<Node<T>>, last_sibling: NonNull<Node<T>>,
+              f: &impl Fn(&mut T)) {
+        while node != last_sibling {
+            f(unsafe{ &mut node.as_mut().item });
+            if Self::has_children(node) {
+                Self::forall(unsafe{ node.as_ref().child }, node, f)
+            }
+            node = unsafe{ node.as_ref().sibling };
+        }
+    }
+
+
+
     /// Link two priority queues.
     ///
     /// # Invariant
@@ -232,6 +245,19 @@ impl<T> PQ<T> {
                 // Finally, pop up (drop) the root.
                 let node = unsafe { Box::from_raw(root.as_ptr()) };
                 Some(node.item)
+            }
+        }
+    }
+
+    /// Apply `f` on each item in the priotiry queue.
+    // An iterator is more versatile but we do not need its full power here.
+    #[inline]
+    pub fn forall(&mut self, f: impl Fn(&mut T)) {
+        if let Some(mut root) = self.root {
+            f(unsafe{ &mut root.as_mut().item });
+            if Node::has_children(root) {
+                Node::forall(unsafe{ root.as_ref().child },
+                             root, &f);
             }
         }
     }
