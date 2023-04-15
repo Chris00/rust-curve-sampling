@@ -1,4 +1,4 @@
-//! Priority Queue adapted to our case.  Wee need it
+//! Priority Queue adapted to our case.  We need it
 //! - to use non-NaN `f64` values as priorities;
 //! - to store pointers (it is made generic);
 //! - to have "witnesses" that can invalidate these pointers in order
