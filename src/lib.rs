@@ -25,8 +25,10 @@ use std::{fmt::{self, Display, Formatter},
           mem::swap};
 use rgb::*;
 
-mod priority_queue;
-use priority_queue as pq;
+mod fibonacci_heap;
+use fibonacci_heap as pq;
+// mod priority_queue;
+// use priority_queue as pq;
 
 mod list;
 use list::List;
