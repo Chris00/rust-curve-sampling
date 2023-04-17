@@ -20,6 +20,7 @@
 //! [TikZ]: https://tikz.dev/
 
 use std::{fmt::{self, Display, Formatter},
+          cell::Cell,
           io::{self, Write},
           iter::Iterator,
           mem::swap};
@@ -145,6 +146,9 @@ pub struct Sampling {
     // not null, it means that the costs need to to be updated.
     pq: PQ,
     path: List<Point>,
+    // Guess on the path length (to allocate vectors) without making
+    // `self` mutable (which the caller would not understand).
+    guess_len: Cell<usize>,
     vp: Option<BoundingBox>, // viewport (zone of interest)
 }
 
@@ -156,6 +160,7 @@ impl Clone for Sampling {
         // Thus start with an empty queue.
         Self { pq: PQ::new(),
                path: self.path.clone(),
+               guess_len: self.guess_len.get().into(),
                vp: self.vp }
     }
 }
@@ -179,6 +184,7 @@ impl Sampling {
     pub(crate) fn empty() -> Self {
         Self { pq: PQ::new(),
                path: List::new(),
+               guess_len: 0.into(),
                vp: None }
     }
 
@@ -187,7 +193,7 @@ impl Sampling {
         debug_assert!(p.t.is_finite() && p.x.is_finite() && p.y.is_finite());
         let mut path = List::new();
         path.push_back(p);
-        Self { pq: PQ::new(), path, vp: None }
+        Self { pq: PQ::new(), path, guess_len: 1.into(), vp: None }
     }
 
     #[inline]
@@ -240,15 +246,19 @@ impl Sampling {
     /// Iterator on the x-coordinates of the sampling.
     /// See [`Self::iter`] for more information.
     #[inline]
-    pub fn x(&self) -> impl Iterator<Item = f64> + '_ {
-        self.iter().map(|[x, _]| x)
+    pub fn x(&self) -> Vec<f64> {
+        let mut v = Vec::with_capacity(self.guess_len.get());
+        for [x, _] in self.iter() { v.push(x) }
+        v
     }
 
     /// Iterator on the y-coordinates of the sampling.
     /// See [`Self::iter`] for more information.
     #[inline]
-    pub fn y(&self) -> impl Iterator<Item = f64> + '_ {
-        self.iter().map(|[_, y]| y)
+    pub fn y(&self) -> Vec<f64> {
+        let mut v = Vec::with_capacity(self.guess_len.get());
+        for [_, y] in self.iter() { v.push(y) }
+        v
     }
 }
 
@@ -373,6 +383,7 @@ impl Sampling {
     #[must_use]
     pub fn clip(&self, bb: BoundingBox) -> Self {
         let mut s = Sampling::empty();
+        let mut new_len: usize = 0;
         // First point of the current segment, if any.
         let mut p0_opt: Option<&Point> = None;
         let mut p0_inside = false;
@@ -393,20 +404,25 @@ impl Sampling {
                             s.path.push_back(p0.clone());
                             if p1_inside {
                                 s.path.push_back(p1.clone());
+                                new_len += 2;
                                 prev_cut = false;
                             } else if
                                 let Some(p) = Self::intersect(p0, p1, bb) {
                                     let t = p.t;
                                     s.path.push_back(p);
                                     s.path.push_back(Point::cut(t));
+                                    new_len += 3;
                                 } else {
                                     s.path.push_back(Point::cut(p0.t));
+                                    new_len += 2;
                                 }
                         } else if p1_inside { // p0 ∉ bb, p1 ∈ bb
                             if let Some(p) = Self::intersect(p1, p0, bb) {
                                 s.path.push_back(p); // p ≠ p1
+                                new_len += 1;
                             }
                             s.path.push_back(p1.clone());
+                            new_len += 1;
                             prev_cut = false;
                         } else { // p0, p1 ∉ bb but maybe intersection
                             match Self::intersect_seg(p0, p1, bb) {
@@ -415,11 +431,13 @@ impl Sampling {
                                     s.path.push_back(q0);
                                     s.path.push_back(q1);
                                     s.path.push_back(Point::cut(t1));
+                                    new_len += 3;
                                 }
                                 Intersection::Pt(p) => {
                                     let t = p.t;
                                     s.path.push_back(p);
                                     s.path.push_back(Point::cut(t));
+                                    new_len += 2;
                                 }
                                 Intersection::Empty => (),
                             }
@@ -435,6 +453,7 @@ impl Sampling {
                         if p0_inside {
                             s.path.push_back(p0.clone());
                             s.path.push_back(Point::cut(p0.t));
+                            new_len += 2;
                         }
                         p0_opt = None;
                     }
@@ -451,25 +470,30 @@ impl Sampling {
                     p0_inside = bb.contains(p1); // update for next step
                     if p0_inside { // p0, p1 ∈ bb
                         s.path.push_back(p1.clone());
+                        new_len += 1;
                     } else { // p0 ∈ bb, p1 ∉ bb
                         if let Some(p) = Self::intersect(p0, p1, bb) {
                             let t = p.t;
                             s.path.push_back(p);
                             s.path.push_back(Point::cut(t));
+                            new_len += 2;
                         } else {
                             s.path.push_back(Point::cut(p0.t));
+                            new_len += 1;
                         }
                         prev_cut = true;
                     }
                 } else { // p1 is invalid (i.e., represent a cut)
                     p0_opt = None;
                     s.path.push_back(p1.clone());
+                    new_len += 1;
                     prev_cut = true
                 }
             }
         }
         if prev_cut { s.path.pop_back(); }
         s.set_vp(bb);
+        s.guess_len.set(new_len);
         s
     }
 
@@ -498,6 +522,7 @@ impl Sampling {
             }
         }}
         skip_until_last_cut!();
+        let mut len: usize = 0;
         while let Some(p) = points.next() {
             if p.is_valid() {
                 s.path.push_back(p);
@@ -505,7 +530,9 @@ impl Sampling {
                 s.path.push_back(Point::cut(p.t));
                 skip_until_last_cut!();
             }
+            len += 1;
         }
+        s.guess_len.set(len);
         s
     }
 
@@ -937,6 +964,7 @@ fn refine_gen(s: &mut Sampling, n: usize,
     let len = match s.len_txy() {
         Some(txy) => txy,
         None => return };
+    s.guess_len.set(s.guess_len.get() + n);
     macro_rules! r { ($x: ident) => { unsafe { $x.as_ref() } } }
     macro_rules! m { ($x: ident) => { unsafe { $x.as_mut() } } }
     for _ in 0 .. n {
@@ -1110,6 +1138,7 @@ impl Sampling {
         let n0 = (n / 10).max(10);
         push_almost_uniform_sampling(&mut points, &mut f, a, b, n0);
         let mut s = Sampling::from_vec(points, a < b);
+        s.guess_len.set(n0);
         match viewport {
             Some(vp) => {
                 let in_vp = |p: &Point| vp.contains(p);
