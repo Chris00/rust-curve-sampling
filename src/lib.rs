@@ -25,10 +25,12 @@ use std::{fmt::{self, Display, Formatter},
           mem::swap};
 use rgb::*;
 
-mod fibonacci_heap;
-use fibonacci_heap as pq;
+// mod fibonacci_heap;
+// use fibonacci_heap as pq;
 // mod priority_queue;
 // use priority_queue as pq;
+mod approx_priority_queue;
+use approx_priority_queue as pq;
 
 mod list;
 use list::List;
@@ -829,7 +831,7 @@ mod cost {
         // of `t`, there is no point in adding indistinguishable details.
         let dx = ((p1.x - p0.x) / len.x).abs();
         let dy = ((p1.y - p0.y) / len.y).abs();
-        let mut cost = p0.cost.abs() + p1.cost.abs();
+        let mut cost = p0.cost.abs() + p1.cost.abs(); // ≥ 0
         if p0.cost * p1.cost < 0. {
             // zigzag are bad on a large scale but less important on a
             // small scale.
