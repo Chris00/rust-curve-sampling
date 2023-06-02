@@ -851,8 +851,8 @@ mod cost {
     /// endpoints.
     #[inline]
     pub(crate) fn segment(p0: &Point, p1: &Point, len: Lengths) -> f64 {
-        let dt = (p1.t - p0.t) / len.t; // ∈ [0,1]
-        debug_assert!((0. ..=1.).contains(&dt));
+        let dt = (p1.t - p0.t).abs() / len.t; // ∈ [0,1]
+        debug_assert!((0. ..=1.).contains(&dt), "dt = {dt} ∉ [0,1]");
         // Put less efforts when `dt` is small.  For functions, the
         // Y-variation may be large but, if it happens for a small range
         // of `t`, there is no point in adding indistinguishable details.
