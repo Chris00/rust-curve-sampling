@@ -23,7 +23,7 @@ use std::{fmt::{self, Display, Formatter},
           cell::Cell,
           io::{self, Write},
           iter::Iterator,
-          mem::swap};
+          mem::swap, ops::ControlFlow};
 use rgb::*;
 
 // mod fibonacci_heap;
@@ -228,19 +228,12 @@ impl Sampling {
     /// interspaced by "cuts" `[f64::NAN; 2]`.  Two cuts never follow
     /// each other.  Isolated points `p` are given by ... `[f64::NAN;
     /// 2]`, `p`, `None`,...
-    pub fn iter(&self) -> impl Iterator<Item = [f64; 2]> + '_ {
-        let mut prev_is_cut = false;
-        self.path.iter().filter_map(move |p| {
-            if p.is_valid() {
-                prev_is_cut = false;
-                Some([p.x, p.y])
-            } else if prev_is_cut {
-                // Do not issue several cuts following each other.
-               None
-            } else {
-                prev_is_cut = true;
-                Some([f64::NAN; 2])
-            }})
+    pub fn iter(&self) -> SamplingIter<'_> {
+        SamplingIter {
+            path: self.path.iter(),
+            prev_is_cut: false,
+            guess_len: self.guess_len.get(),
+        }
     }
 
     /// Iterator on the x-coordinates of the sampling.
@@ -262,6 +255,59 @@ impl Sampling {
     }
 }
 
+/// Iterator on the curve points (and cuts).
+///
+/// Created by [`Sampling::iter`].
+pub struct SamplingIter<'a> {
+    path: list::Iter<'a, Point>,
+    prev_is_cut: bool,
+    guess_len: usize,
+}
+
+impl<'a> Iterator for SamplingIter<'a> {
+    type Item = [f64; 2];
+
+    fn next(&mut self) -> Option<Self::Item> {
+        match self.path.next() {
+            None => None,
+            Some(p) => {
+                self.guess_len -= 1;
+                if p.is_valid() {
+                    self.prev_is_cut = false;
+                    Some([p.x, p.y])
+                } else if self.prev_is_cut {
+                    // Find the next valid point.
+                    let r = self.path.try_fold(0, |n, p| {
+                        if p.is_valid() {
+                            ControlFlow::Break((n, p))
+                        } else {
+                            ControlFlow::Continue(n+1)
+                        }
+                    });
+                    match r {
+                        ControlFlow::Continue(_) => {
+                            // Iterator exhausted
+                            self.guess_len = 0;
+                            None
+                        }
+                        ControlFlow::Break((n, p)) => {
+                            self.guess_len -= n;
+                            self.prev_is_cut = false;
+                            Some([p.x, p.y])
+                        }
+                    }
+                } else {
+                    self.prev_is_cut = true;
+                    Some([f64::NAN; 2])
+                }
+            }
+        }
+    }
+
+    fn size_hint(&self) -> (usize, Option<usize>) {
+        (0, Some(self.guess_len))
+    }
+}
 
 /// Intersection of a segment with the bounding box.
 #[derive(Debug)]
