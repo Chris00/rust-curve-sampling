@@ -503,6 +503,7 @@ impl Sampling {
     where P: IntoIterator<Item = Point> {
         let mut s = Sampling::empty();
         let mut points = points.into_iter();
+        let mut len: usize = 0;
         macro_rules! skip_until_last_cut { () => {
             let mut cut = None;
             let mut first_pt = None;
@@ -511,26 +512,31 @@ impl Sampling {
                 cut = Some(p);
             }
             match (cut, first_pt) {
-                (_, None) => return s,
+                (_, None) => {
+                    s.guess_len.set(len);
+                    return s
+                }
                 (None, Some(p)) => {
                     s.path.push_back(p);
+                    len += 1;
                 }
                 (Some(c), Some(p)) => {
                     s.path.push_back(Point::cut(c.t));
                     s.path.push_back(p);
+                    len += 2;
                 }
             }
         }}
         skip_until_last_cut!();
-        let mut len: usize = 0;
         while let Some(p) = points.next() {
             if p.is_valid() {
                 s.path.push_back(p);
+                len += 1;
             } else {
                 s.path.push_back(Point::cut(p.t));
+                len += 1;
                 skip_until_last_cut!();
             }
-            len += 1;
         }
         s.guess_len.set(len);
         s
@@ -1138,7 +1144,6 @@ impl Sampling {
         let n0 = (n / 10).max(10);
         push_almost_uniform_sampling(&mut points, &mut f, a, b, n0);
         let mut s = Sampling::from_vec(points, a < b);
-        s.guess_len.set(n0);
         match viewport {
             Some(vp) => {
                 let in_vp = |p: &Point| vp.contains(p);
