@@ -23,7 +23,7 @@ use std::{fmt::{self, Display, Formatter},
           cell::Cell,
           io::{self, Write},
           iter::Iterator,
-          mem::swap, ops::ControlFlow};
+          ops::ControlFlow};
 use rgb::*;
 
 // mod fibonacci_heap;
@@ -66,8 +66,8 @@ impl BoundingBox {
     /// the boundary).
     #[inline]
     fn contains(&self, p: &Point) -> bool {
-        self.xmin <= p.x && p.x <= self.xmax
-            && self.ymin <= p.y && p.y <= self.ymax
+        let [x, y] = p.xy;
+        self.xmin <= x && x <= self.xmax && self.ymin <= y && y <= self.ymax
     }
 
     /// Return the smaller bounding-box containing both `self` and
@@ -96,8 +96,7 @@ impl BoundingBox {
 #[derive(Debug)]
 struct Point {
     t: f64, // "time" parameter, ALWAYS finite.
-    x: f64,
-    y: f64, // `y` is finite ⇒ `x` is finite
+    xy: [f64; 2], // [`x`, `y`];  `y` is finite ⇒ `x` is finite
     cost: f64, // Cache the cost of the point (not the segment).  If
                // the point is not valid, the cost has no meaning.
 
@@ -117,21 +116,21 @@ impl Clone for Point {
 impl Point {
     /// Return a new point.  `t` is assumed to be finite.
     #[inline]
-    fn new_unchecked(t: f64, x: f64, y: f64) -> Self {
-        Point { t, x, y,  cost: 0.,
+    fn new_unchecked(t: f64, xy: [f64; 2]) -> Self {
+        Point { t, xy,  cost: 0.,
                 witness: None }
     }
 
     #[inline]
     fn cut(t: f64) -> Self {
-        Point { t, x: f64::NAN, y: f64::NAN,
+        Point { t, xy: [f64::NAN; 2],
                 cost: 0.,
                 witness: None }
     }
 
     /// Return `true` if the point is valid — otherwise it is a cut.
     #[inline]
-    fn is_valid(&self) -> bool { self.y.is_finite() }
+    fn is_valid(&self) -> bool { self.xy[1].is_finite() }
 
 }
 
@@ -190,7 +189,7 @@ impl Sampling {
 
     #[inline]
     pub(crate) fn singleton(p: Point) -> Self {
-        debug_assert!(p.t.is_finite() && p.x.is_finite() && p.y.is_finite());
+        debug_assert!(p.t.is_finite() && p.xy.iter().all(|z| z.is_finite()));
         let mut path = List::new();
         path.push_back(p);
         Self { pq: PQ::new(), path, guess_len: 1.into(), vp: None }
@@ -274,7 +273,7 @@ impl<'a> Iterator for SamplingIter<'a> {
                 self.guess_len -= 1;
                 if p.is_valid() {
                     self.prev_is_cut = false;
-                    Some([p.x, p.y])
+                    Some(p.xy)
                 } else if self.prev_is_cut {
                     // Find the next valid point.
                     let r = self.path.try_fold(0, |n, p| {
@@ -293,7 +292,7 @@ impl<'a> Iterator for SamplingIter<'a> {
                         ControlFlow::Break((n, p)) => {
                             self.guess_len -= n;
                             self.prev_is_cut = false;
-                            Some([p.x, p.y])
+                            Some(p.xy)
                         }
                     }
                 } else {
@@ -340,7 +339,8 @@ impl Sampling {
     /// Transpose in place the x and y coordinates of the sampling.
     pub fn transpose(&mut self) -> &mut Self {
         for p in self.path.iter_mut() {
-            swap(&mut p.x, &mut p.y)
+            let [x, y] = p.xy;
+            p.xy = [y, x];
         }
         self
     }
@@ -352,18 +352,19 @@ impl Sampling {
     #[must_use]
     fn intersect(p0: &Point, p1: &Point, bb: BoundingBox) -> Option<Point> {
         let mut t = 1.; // t ∈ [0, 1]
-        let dx = p1.x - p0.x; // May be 0.
-        let r = (if dx >= 0. {bb.xmax} else {bb.xmin} - p0.x) / dx;
+        let [x0, y0] = p0.xy;
+        let [x1, y1] = p1.xy;
+        let dx = x1 - x0; // May be 0.
+        let r = (if dx >= 0. {bb.xmax} else {bb.xmin} - x0) / dx;
         if r < t { t = r } // ⟹ r finite (as r ≥ 0 or NaN)
-        let dy = p1.y - p0.y; // May be 0.
-        let r = (if dy >= 0. {bb.ymax} else {bb.ymin} - p0.y) / dy;
+        let dy = y1 - y0; // May be 0.
+        let r = (if dy >= 0. {bb.ymax} else {bb.ymin} - y0) / dy;
         if r < t { t = r };
         if t <= 1e-14 {
             None
         } else {
             Some(Point::new_unchecked(p0.t + t * (p1.t - p0.t),
-                                      p0.x + t * dx,
-                                      p0.y + t * dy))
+                [x0 + t * dx, y0 + t * dy]))
         }
     }
 
@@ -376,28 +377,30 @@ impl Sampling {
     fn intersect_seg(p0: &Point, p1: &Point, bb: BoundingBox) -> Intersection {
         let mut t0 = 0.; // t0 ∈ [0, 1]
         let mut t1 = 1.; // t1 ∈ [0, 1]
-        let dx = p1.x - p0.x; // may be 0.
+        let [x0, y0] = p0.xy;
+        let [x1, y1] = p1.xy;
+        let dx = x1 - x0; // may be 0.
         let r0;
         let r1; // r0 ≤ r1 or NAN if on x-boundary lines.
         if dx >= 0. {
-            r0 = (bb.xmin - p0.x) / dx;
-            r1 = (bb.xmax - p0.x) / dx;
+            r0 = (bb.xmin - x0) / dx;
+            r1 = (bb.xmax - x0) / dx;
         } else {
-            r0 = (bb.xmax - p0.x) / dx;
-            r1 = (bb.xmin - p0.x) / dx;
+            r0 = (bb.xmax - x0) / dx;
+            r1 = (bb.xmin - x0) / dx;
         }
         if r0 > 1. || r1 < 0. { return Intersection::Empty }
         if r0 > 0. { t0 = r0 } // if r0 is NAN, keep the whole segment
         if r1 < 1. { t1 = r1 }
-        let dy = p1.y - p0.y; // may be 0.
+        let dy = y1 - y0; // may be 0.
         let r0;
         let r1;
         if dy >= 0. {
-            r0 = (bb.ymin - p0.y) / dy;
-            r1 = (bb.ymax - p0.y) / dy;
+            r0 = (bb.ymin - y0) / dy;
+            r1 = (bb.ymax - y0) / dy;
         } else {
-            r0 = (bb.ymax - p0.y) / dy;
-            r1 = (bb.ymin - p0.y) / dy;
+            r0 = (bb.ymax - y0) / dy;
+            r1 = (bb.ymin - y0) / dy;
         }
         if r0 > t1 || r1 < t0 { return Intersection::Empty }
         if r0 > t0 { t0 = r0 }
@@ -405,16 +408,14 @@ impl Sampling {
         if t0 < t1 { // segment not reduced to a point
             let dt = p1.t - p0.t;
             let q0 = Point::new_unchecked(p0.t + t0 * dt,
-                                          p0.x + t0 * dx,
-                                          p0.y + t0 * dy);
+                [x0 + t0 * dx, y0 + t0 * dy]);
             let q1 = Point::new_unchecked(p0.t + t1 * dt,
-                                          p0.x + t1 * dx,
-                                          p0.y + t1 * dy);
+                [x0 + t1 * dx, y0 + t1 * dy]);
             Intersection::Seg(q0, q1)
         } else if t0 == t1 {
-            let q0 = Point::new_unchecked(p0.t + t0 * (p1.t - p0.t),
-                                          p0.x + t0 * dx,
-                                          p0.y + t0 * dy);
+            let q0 = Point::new_unchecked(
+                p0.t + t0 * (p1.t - p0.t),
+                [x0 + t0 * dx, y0 + t0 * dy]);
             Intersection::Pt(q0)
         } else {
             Intersection::Empty
@@ -612,9 +613,9 @@ impl FromIterator<[f64; 2]> for Sampling {
     fn from_iter<T>(points: T) -> Self
     where T: IntoIterator<Item = [f64; 2]> {
         Sampling::from_point_iterator(
-            points.into_iter().enumerate().map(|(i, [x, y])| {
+            points.into_iter().enumerate().map(|(i, xy)| {
                 let t = i as f64;
-                if x.is_finite() {Point::new_unchecked(t, x, y)}
+                if xy[0].is_finite() {Point::new_unchecked(t, xy)}
                 else {Point::cut(t)} }))
     }
 }
@@ -629,16 +630,17 @@ impl FromIterator<[f64; 2]> for Sampling {
 impl From<(f64, f64)> for Point {
     #[inline]
     fn from((x, y): (f64, f64)) -> Self {
-        Point::new_unchecked(x, x, y) // `x` ∈ [a, b] by `init_pt` checks.
+        // `x` ∈ [a, b] by `init_pt` checks.
+        Point::new_unchecked(x, [x, y])
     }
 }
 
 impl From<(f64, [f64; 2])> for Point {
     /// Assume `t` is finite.
     #[inline]
-    fn from((t, [x,y]): (f64, [f64;2])) -> Self {
+    fn from((t, xy): (f64, [f64;2])) -> Self {
         // Enforce the invariant: y finite ⟹ x finite
-        if x.is_finite() { Point::new_unchecked(t, x, y) }
+        if xy[0].is_finite() { Point::new_unchecked(t, xy) }
         else { Point::cut(t) }
     }
 }
@@ -657,7 +659,7 @@ struct FnPoint<T>(T);
 impl<T> IntoFnPoint for FnPoint<T> where T: FnMut(f64) -> f64 {
     #[inline]
     fn eval(&mut self, t: f64) -> Point {
-        Point::new_unchecked(t, t, self.0(t))
+        Point::new_unchecked(t, [t, self.0(t)])
     }
 }
 
@@ -666,11 +668,11 @@ struct ParamPoint<T>(T);
 impl<T> IntoFnPoint for ParamPoint<T> where T: FnMut(f64) -> [f64; 2] {
     #[inline]
     fn eval(&mut self, t: f64) -> Point {
-        let [x, y] = self.0(t);
+        let xy = self.0(t);
         // `Point::is_valid()` only checks `y`; make sure non-finite
         // `x` leads to an invalid point.
-        if x.is_finite() { Point::new_unchecked(t, x, y) }
-        else { Point::new_unchecked(t, x, f64::NAN) }
+        if xy[0].is_finite() { Point::new_unchecked(t, xy) }
+        else { Point::new_unchecked(t, [xy[0], f64::NAN]) }
     }
 }
 
@@ -873,11 +875,15 @@ mod cost {
     /// and `p1` are valid points.
     #[inline]
     pub(crate) fn set_middle(p0: &Point, pm: &mut Point, p1: &Point,
-                             len: Lengths) {
-        let dx0m = (p0.x - pm.x) / len.x;
-        let dy0m = (p0.y - pm.y) / len.y;
-        let dx1m = (p1.x - pm.x) / len.x;
-        let dy1m = (p1.y - pm.y) / len.y;
+                             len: Lengths)
+    {
+        let [x0, y0] = p0.xy;
+        let [xm, ym] = pm.xy;
+        let [x1, y1] = p1.xy;
+        let dx0m = (x0 - xm) / len.x;
+        let dy0m = (y0 - ym) / len.y;
+        let dx1m = (x1 - xm) / len.x;
+        let dy1m = (y1 - ym) / len.y;
         let len0m = dx0m.hypot(dy0m);
         let len1m = dx1m.hypot(dy1m);
         if len0m == 0. || len1m == 0. {
@@ -908,8 +914,10 @@ mod cost {
         // Put less efforts when `dt` is small.  For functions, the
         // Y-variation may be large but, if it happens for a small range
         // of `t`, there is no point in adding indistinguishable details.
-        let dx = ((p1.x - p0.x) / len.x).abs();
-        let dy = ((p1.y - p0.y) / len.y).abs();
+        let [x0, y0] = p0.xy;
+        let [x1, y1] = p1.xy;
+        let dx = ((x1 - x0) / len.x).abs();
+        let dy = ((y1 - y0) / len.y).abs();
         let mut cost = p0.cost.abs() + p1.cost.abs(); // ≥ 0
         if p0.cost * p1.cost < 0. {
             // zigzag are bad on a large scale but less important on a
@@ -1534,7 +1542,8 @@ mod tests {
 
     fn xy_of_sampling(s: &Sampling) -> Vec<Option<(f64, f64)>> {
         s.path.iter().map(|p| {
-            if p.is_valid() { Some((p.x, p.y)) } else { None }})
+            if p.is_valid() { Some((p.xy[0], p.xy[1])) } else { None }
+        })
             .collect()
     }
 
@@ -1559,7 +1568,7 @@ mod tests {
     #[test]
     fn bounding_box_singleton() {
         let s = Sampling::singleton(
-            Point::new_unchecked(0., 1., 2.));
+            Point::new_unchecked(0., [1., 2.]));
         let bb = BoundingBox {xmin: 1., xmax: 1., ymin: 2., ymax: 2.};
         assert_eq!(s.bounding_box(), bb);
     }
@@ -1653,7 +1662,8 @@ mod tests {
         let mut fh = File::create(fname)?;
         for p in s.path.iter() {
             if p.is_valid() {
-                writeln!(fh, "{} {} {}", p.x, p.y, p.cost)?;
+                let [x, y] = p.xy;
+                writeln!(fh, "{x} {y} {}", p.cost)?;
             } else {
                 writeln!(fh)?;
             }
@@ -1678,8 +1688,10 @@ mod tests {
         }
         seg.sort_by(|(t1,_,_,_), (t2,_,_,_)| t1.partial_cmp(t2).unwrap());
         for (tm, p0, p1, priority) in seg {
+            let [x0, y0] = p0.xy;
+            let [x1, y1] = p1.xy;
             writeln!(fh, "{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}",
-                     tm, p0.t, p0.x, p0.y,  p1.t, p1.x, p1.y, priority)?;
+                     tm, p0.t, x0, y0,  p1.t, x1, y1, priority)?;
         }
         Ok(())
     }
