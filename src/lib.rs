@@ -96,7 +96,7 @@ impl BoundingBox {
 #[derive(Debug)]
 struct Point {
     t: f64, // "time" parameter, ALWAYS finite.
-    xy: [f64; 2], // [`x`, `y`];  `y` is finite ⇒ `x` is finite
+    xy: [f64; 2],
     cost: f64, // Cache the cost of the point (not the segment).  If
                // the point is not valid, the cost has no meaning.
 
@@ -130,7 +130,9 @@ impl Point {
 
     /// Return `true` if the point is valid — otherwise it is a cut.
     #[inline]
-    fn is_valid(&self) -> bool { self.xy[1].is_finite() }
+    fn is_valid(&self) -> bool {
+        self.xy.iter().all(|z| z.is_finite())
+    }
 
 }
 
@@ -221,16 +223,27 @@ impl Sampling {
         Some(Lengths { t: (p1.t - p0.t).abs(), x: len_x, y: len_y })
     }
 
-    /// Iterate on the points (and cuts) of the path.  More precisely,
-    /// a path is made of continuous segments whose points are given
-    /// by contiguous values `[x,y]` with both `x` and `y` not NaN,
-    /// interspaced by "cuts" `[f64::NAN; 2]`.  Two cuts never follow
-    /// each other.  Isolated points `p` are given by ... `[f64::NAN;
-    /// 2]`, `p`, `None`,...
+    /// Returns an iterator on the points (and cuts) of the path.
+    /// More precisely, a path is made of continuous segments whose
+    /// points are given by contiguous values `[x,y]` with both `x`
+    /// and `y` not NaN, interspaced by "cuts" `[f64::NAN; 2]`.  Two
+    /// cuts never follow each other.  Isolated points `p` are given
+    /// by ... `[f64::NAN; 2]`, `p`, `None`,...
     pub fn iter(&self) -> SamplingIter<'_> {
         SamplingIter {
             path: self.path.iter(),
             prev_is_cut: false,
+            guess_len: self.guess_len.get(),
+        }
+    }
+
+    /// Returns an iterator that allows to modify the points and cuts
+    /// of the path.  Unlike [`iter`], this iterates on all the nodes
+    /// even if several cuts (i.e., node with a non finite coordinate)
+    /// follow each other.
+    pub fn iter_mut(&mut self) -> SamplingIterMut<'_> {
+        SamplingIterMut {
+            path: self.path.iter_mut(),
             guess_len: self.guess_len.get(),
         }
     }
@@ -305,6 +318,28 @@ impl<'a> Iterator for SamplingIter<'a> {
 
     fn size_hint(&self) -> (usize, Option<usize>) {
         (0, Some(self.guess_len))
+    }
+}
+
+/// Mutable iterator on the curve points (and cuts).
+///
+/// Created by [`Sampling::iter_mut`].
+pub struct SamplingIterMut<'a> {
+    path: list::IterMut<'a, Point>,
+    guess_len: usize,
+}
+
+impl<'a> Iterator for SamplingIterMut<'a> {
+    type Item = &'a mut [f64; 2];
+
+    fn next(&mut self) -> Option<Self::Item> {
+        match self.path.next() {
+            None => None,
+            Some(p) => {
+                self.guess_len -= 1;
+                Some(&mut p.xy)
+            }
+        }
     }
 }
 
@@ -613,10 +648,13 @@ impl FromIterator<[f64; 2]> for Sampling {
     fn from_iter<T>(points: T) -> Self
     where T: IntoIterator<Item = [f64; 2]> {
         Sampling::from_point_iterator(
-            points.into_iter().enumerate().map(|(i, xy)| {
+            points.into_iter().enumerate().map(|(i, xy @ [x, y])| {
                 let t = i as f64;
-                if xy[0].is_finite() {Point::new_unchecked(t, xy)}
-                else {Point::cut(t)} }))
+                if x.is_finite() && y.is_finite() {
+                    Point::new_unchecked(t, xy)
+                } else {
+                    Point::cut(t)
+                } }))
     }
 }
 
@@ -668,11 +706,12 @@ struct ParamPoint<T>(T);
 impl<T> IntoFnPoint for ParamPoint<T> where T: FnMut(f64) -> [f64; 2] {
     #[inline]
     fn eval(&mut self, t: f64) -> Point {
-        let xy = self.0(t);
-        // `Point::is_valid()` only checks `y`; make sure non-finite
-        // `x` leads to an invalid point.
-        if xy[0].is_finite() { Point::new_unchecked(t, xy) }
-        else { Point::new_unchecked(t, [xy[0], f64::NAN]) }
+        let xy @ [x, y] = self.0(t);
+        if x.is_finite() && y.is_finite() {
+            Point::new_unchecked(t, xy)
+        } else {
+            Point::new_unchecked(t, [xy[0], f64::NAN])
+        }
     }
 }
 
