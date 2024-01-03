@@ -12,7 +12,7 @@ Add this to your `Cargo.toml`:
 
 ```
 [dependencies]
-curve-sampling = "0.1.0"
+curve-sampling = "0.4"
 ```
 
 See the [documentation](https://docs.rs/curve-sampling/).
