@@ -232,7 +232,7 @@ impl Sampling {
     pub fn iter(&self) -> SamplingIter<'_> {
         SamplingIter {
             path: self.path.iter(),
-            prev_is_cut: false,
+            prev_is_cut: true,
             guess_len: self.guess_len.get(),
         }
     }
