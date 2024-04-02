@@ -2,12 +2,10 @@
 //! sampling of curves as well as manipulating those samplings.
 //!
 //! As of now, the following is available:
-//! - uniform sampling of the graph of functions ℝ → ℝ
-//!   (see [`Sampling::uniform`]);
-//! - adaptive sampling of the graph functions ℝ → ℝ
-//!   (see [`Sampling::fun`]);
-//! - adaptive sampling of the image functions ℝ → ℝ²
-//!   (see [`Sampling::param`]).
+//! - uniform sampling of the graph of functions ℝ → ℝ and the image
+//!   of functions ℝ → ℝ² (see [`Sampling::uniform`]);
+//! - adaptive sampling of the graph functions ℝ → ℝ and the image of
+//!   functions ℝ → ℝ² (see [`Sampling::fun`]).
 //!
 //! Samplings can be saved as a list of coordinates x-y, one point per
 //! line with blank lines to indicate that the path is interrupted,
@@ -1318,8 +1316,12 @@ impl<D> Sampling<D> {
 
 
 new_sampling_fn!(
-    /// Create a sampling of the *graph* of `f` on the interval
-    /// \[`a`, `b`\] by evaluating `f` at `n` points.
+    /// When `f` returns `f64` (resp. `[f64; 2]`), construct a
+    /// sampling of the *graph* (resp. the *image*) of `f` on the
+    /// interval \[`a`, `b`\] by evaluating `f` at `n` points.  The
+    /// function `f` may also provide additional data by returning
+    /// `(f64, D)` or `([f64; 2], D)` (the type `D` will be
+    /// instantiated to the type of that data).
     ,
     /// # Example
     ///
@@ -1328,7 +1330,9 @@ new_sampling_fn!(
     /// use curve_sampling::Sampling;
     /// # fn main() -> Result<(), Box<dyn std::error::Error>> {
     /// let s = Sampling::fun(|x| x.sin(), 0., 4.).build();
-    /// s.write(&mut BufWriter::new(File::create("target/fun.dat")?))?;
+    /// s.write(&mut BufWriter::new(File::create("target/fun1.dat")?))?;
+    /// let s = Sampling::fun(|x| [x.sin(), x.cos()], 0., 4.).build();
+    /// s.write(&mut BufWriter::new(File::create("target/fun2.dat")?))?;
     /// # Ok(()) }
     /// ```
     fun -> f64,
@@ -1352,6 +1356,7 @@ where F: FnMut(f64) -> Y,
 
 
 new_sampling_fn!(
+    #[deprecated(note = "Use Sampling::fun instead")]
     /// Create a sampling of the *image* of `f` on the interval
     /// \[`a`, `b`\] by evaluating `f` at `n` points.
     ,
@@ -1366,6 +1371,7 @@ new_sampling_fn!(
     /// # Ok(()) }
     /// ```
     param -> [f64; 2],
+    //#[deprecated(note = "See curve_sampling::Fun instead")]
     /// Options for sampling the image of functions ℝ → ℝ².
     /// See [`Sampling::param`].
     Param,
