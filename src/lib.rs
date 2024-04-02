@@ -750,67 +750,6 @@ impl<D> Img<D> for ([f64; 2], D) {
     }
 }
 
-////////////////////////////////////////////////////////////////////////
-//
-// Acceptable types & functions that provide "points".
-// These "conversions" must enforce the specification: `p.x` finite ⟹
-// `p.y` finite.
-// This is internal to this library.
-
-// impl<D> From<(f64, f64, D)> for Point<D> {
-//     #[inline]
-//     fn from((x, y, data): (f64, f64, D)) -> Self {
-//         // `x` ∈ [a, b] by `init_pt` checks.
-//         Point::new_unchecked(x, [x, y], data)
-//     }
-// }
-
-// impl<D> From<(f64, [f64; 2], D)> for Point<D> {
-//     /// Assume `t` is finite.
-//     #[inline]
-//     fn from((t, xy, data): (f64, [f64;2], D)) -> Self {
-//         // Enforce the invariant: y finite ⟹ x finite
-//         if xy[0].is_finite() {
-//             Point::new_unchecked(t, xy, data)
-//         } else {
-//             Point::cut(t, data)
-//         }
-//     }
-// }
-
-// /// Values that can be treated as Fn(f64) -> Point.
-// trait IntoFnPoint<D> {
-//     fn eval(&mut self, t: f64) -> Point<D>;
-// }
-
-// // This trait cannot implemented for both `FnMut(f64) -> f64` and
-// // `FnMut(f64) -> [f64; 2]` (that conflicts), so we wrap the types of
-// // interest.
-// struct FnPoint<F>(F);
-
-// impl<F, D> IntoFnPoint<D> for FnPoint<F>
-// where F: FnMut(f64) -> (f64, D) {
-//     #[inline]
-//     fn eval(&mut self, t: f64) -> Point<D> {
-//         let (y, data) = self.0(t);
-//         Point::new_unchecked(t, [t, y], data)
-//     }
-// }
-
-// struct ParamPoint<F>(F);
-
-// impl<F, D> IntoFnPoint<D> for ParamPoint<F>
-// where F: FnMut(f64) -> ([f64; 2], D) {
-//     #[inline]
-//     fn eval(&mut self, t: f64) -> Point<D> {
-//         let (xy @ [x, y], data) = self.0(t);
-//         if x.is_finite() && y.is_finite() {
-//             Point::new_unchecked(t, xy, data)
-//         } else {
-//             Point::new_unchecked(t, [xy[0], f64::NAN], data)
-//         }
-//     }
-// }
 
 ////////////////////////////////////////////////////////////////////////
 //
