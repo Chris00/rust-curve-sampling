@@ -11,7 +11,7 @@ fn main() -> R {
     write!(fh, "set terminal pngcairo\n\
                 set grid\n")?;
     let mut d = 0;
-    let mut save = |s: &Sampling, n, title| -> R {
+    let mut save = |s: &Sampling<_>, n, title| -> R {
         d += 1;
         let fname = format!("/tmp/sin_inv_x{}.dat", d);
         s.write(&mut File::create(&fname)?)?;
