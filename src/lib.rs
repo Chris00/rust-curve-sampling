@@ -291,6 +291,15 @@ impl<D> Sampling<D> {
         }
     }
 
+    /// Consumes the sampling and return an iterator on the curve
+    /// points and (owned) associated data.
+    pub fn into_iter_data(self) -> SamplingIntoIterData<D> {
+        SamplingIntoIterData {
+            path: self.path.into_iter(),
+            guess_len: self.guess_len.get(),
+        }
+    }
+
     /// Iterator on the x-coordinates of the sampling.
     /// See [`Self::iter`] for more information.
     #[inline]
@@ -406,7 +415,36 @@ impl<'a, D> Iterator for SamplingIterMut<'a, D> {
             }
         }
     }
+
+    fn size_hint(&self) -> (usize, Option<usize>) {
+        (0, Some(self.guess_len))
+    }
 }
+
+/// Iterator returning the curve points and owned data.
+pub struct SamplingIntoIterData<D> {
+    path: list::IntoIter<Point<D>>,
+    guess_len: usize,
+}
+
+impl<D> Iterator for SamplingIntoIterData<D> {
+    type Item = ([f64; 2], D);
+
+    fn next(&mut self) -> Option<Self::Item> {
+        match self.path.next() {
+            None => None,
+            Some(p) => {
+                self.guess_len -= 1;
+                Some((p.xy, p.data))
+            }
+        }
+    }
+
+    fn size_hint(&self) -> (usize, Option<usize>) {
+        (0, Some(self.guess_len))
+    }
+}
+
 
 /// Intersection of a segment with the bounding box.
 #[derive(Debug)]
@@ -1813,6 +1851,18 @@ mod tests {
             ([0.,0.], &0), ([1.,1.], &1), ([2.,2.], &2), ([3., 0.], &-1),
             ([4.,4.], &4)];
         for (i, d) in s.iter_data().enumerate() {
+            assert_eq!(d, expected[i]);
+        }
+    }
+
+    #[test]
+    fn into_iter_data() {
+        let s = Sampling::uniform(|x| (x, x as i32), 0., 4.).n(3)
+            .init(&[1.]).init_pt([(3., (0., -1))]).build();
+        let expected = vec![
+            ([0.,0.], 0), ([1.,1.], 1), ([2.,2.], 2), ([3., 0.], -1),
+            ([4.,4.], 4)];
+        for (i, d) in s.into_iter_data().enumerate() {
             assert_eq!(d, expected[i]);
         }
     }
