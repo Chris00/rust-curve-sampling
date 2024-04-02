@@ -150,6 +150,18 @@ impl<T> List<T> {
                   marker: PhantomData }
     }
 
+    pub fn into_iter(mut self) -> IntoIter<T> {
+        let iter = IntoIter {
+            head: self.head,
+            marker: PhantomData
+        };
+        // Prevent the nodes of `self` to be freed at the end of this
+        // block — the iterator is now in charge of them.
+        self.head = None;
+        self.tail = None;
+        iter
+    }
+
     pub fn iter_witness_mut(&mut self) -> IterWitnessMut<'_, T> {
         IterWitnessMut { head: self.head,
                          //tail: self.tail,
@@ -159,7 +171,6 @@ impl<T> List<T> {
 }
 
 /// An iterator over the elements of the list.
-#[derive(Clone)]
 pub struct Iter<'a, T: 'a> {
     head: Option<NonNull<Node<T>>>, // None if at end
     //tail: Option<NonNull<Node<T>>>,
@@ -167,15 +178,19 @@ pub struct Iter<'a, T: 'a> {
 }
 
 /// A mutable iterator over the elements of the list.
-#[derive(Clone)]
 pub struct IterMut<'a, T: 'a> {
     head: Option<NonNull<Node<T>>>, // None if at end
     //tail: Option<NonNull<Node<T>>>,
     marker: PhantomData<&'a mut Node<T>>,
 }
 
+/// An iterator over the elements of the list.
+pub struct IntoIter<T> {
+    head: Option<NonNull<Node<T>>>, // None if at end
+    marker: PhantomData<Node<T>>,
+}
+
 /// A mutable iterator over witnesses to elements of the list.
-#[derive(Clone)]
 pub struct IterWitnessMut<'a, T: 'a> {
     head: Option<NonNull<Node<T>>>, // None if at end
     //tail: Option<NonNull<Node<T>>>,
@@ -206,6 +221,31 @@ impl<'a, T> Iterator for IterMut<'a, T> {
             let node = &mut *node.as_ptr();
             self.head = node.next;
             &mut node.item
+        })
+    }
+}
+
+/// If the iterator is not completely consumed, dropping it must free
+/// the remaining memory of the list.
+impl<T> Drop for IntoIter<T> {
+    fn drop(&mut self) {
+        let mut node = self.head;
+        while let Some(n) = node {
+            let n = unsafe { Box::from_raw(n.as_ptr()) };
+            node = n.next;
+        }
+    }
+}
+
+impl<T> Iterator for IntoIter<T> {
+    type Item = T;
+
+    #[inline]
+    fn next(&mut self) -> Option<T> {
+        self.head.map(|node| {
+            let node = unsafe { Box::from_raw(node.as_ptr()) };
+            self.head = node.next;
+            node.item
         })
     }
 }
@@ -332,6 +372,28 @@ mod test {
         l.push_back("c");
         let v: Vec<_> = l.iter_mut().collect();
         assert_eq!(v, vec![&"a", &"b", &"c"]);
+    }
+
+    #[test]
+    fn into_iter() {
+        let mut l = List::new();
+        l.push_back("a".to_string());
+        l.push_back("b".to_string());
+        l.push_back("c".to_string());
+        let v: Vec<String> = l.into_iter().collect();
+        assert_eq!(v, vec!["a", "b", "c"]);
+    }
+
+    #[test]
+    fn into_iter_not_consumed() {
+        let mut l = List::new();
+        l.push_back("a".to_string());
+        l.push_back("b".to_string());
+        l.push_back("c".to_string());
+        let mut i = l.into_iter();
+        assert_eq!(i.next(), Some("a".to_string()));
+        // Do not consume all of `i` so that Miri can check whether
+        // the nodes are indeed freed by dropping `i`.
     }
 
     #[test]
