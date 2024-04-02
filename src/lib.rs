@@ -204,7 +204,7 @@ impl Sampling {
 
     /// Return the length of the "time interval" as well as the
     /// lengths of the viewport.
-    pub(crate) fn len_txy(&self) -> Option<Lengths> {
+    pub(crate) fn lengths(&self) -> Option<Lengths> {
         if self.is_empty() { return None }
         let p0 = self.path.first().unwrap();
         let p1 = self.path.last().unwrap();
@@ -1012,7 +1012,7 @@ unsafe fn update_segment(pq: &mut PQ, p0: &Point, p1: &Point, len: Lengths) {
 /// Update the cost of all points in the sampling and add segments
 /// to the priority queue.
 fn compute(s: &mut Sampling, in_vp: impl Fn(&Point) -> bool) {
-    if let Some(len) = s.len_txy() {
+    if let Some(len) = s.lengths() {
         macro_rules! r { ($x: ident) => { unsafe { $x.as_ref() } } }
         macro_rules! m { ($x: ident) => { unsafe { $x.as_mut() } } }
         // Path is not empty.
@@ -1060,8 +1060,8 @@ fn compute(s: &mut Sampling, in_vp: impl Fn(&Point) -> bool) {
 fn refine_gen(s: &mut Sampling, n: usize,
               mut f: impl FnMut(f64) -> Point,
               in_vp: impl Fn(&Point) -> bool) {
-    let len = match s.len_txy() {
-        Some(txy) => txy,
+    let len = match s.lengths() {
+        Some(lengths) => lengths,
         None => return };
     s.guess_len.set(s.guess_len.get() + n);
     macro_rules! r { ($x: ident) => { unsafe { $x.as_ref() } } }
