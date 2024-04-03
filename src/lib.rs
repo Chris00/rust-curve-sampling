@@ -852,7 +852,7 @@ macro_rules! new_sampling_fn {
                     panic!("curve_sampling::{}: b = {} must be finite",
                            stringify!($fun), b);
                 }
-                $struct { f: f,
+                $struct { f,
                           a, b,  // Order of `a`, `b` reflect orientation
                           n: 100,
                           viewport: None,
@@ -914,7 +914,7 @@ macro_rules! new_sampling_fn {
             /// `b` (see [`
             #[doc = stringify!(Sampling::$fun)]
             /// `]) are considered (other values are ignored).
-            pub fn init_pt<'a, I>(mut self, pts: I) -> Self
+            pub fn init_pt<I>(mut self, pts: I) -> Self
             where I: IntoIterator<Item = (f64, Y)>,
             {
                 for (t, y) in pts {
