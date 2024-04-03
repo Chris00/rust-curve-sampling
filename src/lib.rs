@@ -81,8 +81,10 @@ impl BoundingBox {
 // Sampling datastructure
 
 /// Type indicating that no data is associated with the sampling.
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct NoData {
+    // Non-constructible outside this library (i.e. can only be used
+    // as a type annotation).
     marker: PhantomData<()>,
 }
 
@@ -782,11 +784,24 @@ where Y: Img<D> {
 
 /// Suitable images of functions that can be used to generate samplings.
 #[allow(private_interfaces)]
+// This trait is not implementable from the outside so it must uphold
+// its invariants for example `Point.t` must be the `t` provided and
+// be finite,...
 pub trait Img<D> {
     /// Transform a map `f64` → `self` into the internal value `Point`.
     /// It will only be used with finite `t`.
     fn into_point(self, t: f64) -> Point<D>;
 }
+// Another possible trait could have been one that has a projection
+// from the data on the coordinates X-Y — fn xy(&self) → [f64; 2] —
+// but usually that data `D` requires additional context to perform
+// the conversion (for example an EDP FEM solution u needs to know the
+// mesh and inner product to compute ‖u‖) so it is better that the
+// function we evaluate performs the conversion (it usually possesses
+// the context).
+
+/// Wrapper to indicate that a value is a data associated with a point.
+pub struct Data<D>(D);
 
 #[allow(private_interfaces)]
 impl Img<NoData> for f64 {
