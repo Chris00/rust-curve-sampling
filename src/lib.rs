@@ -801,7 +801,7 @@ pub trait Img<D> {
 // the context).
 
 /// Wrapper to indicate that a value is a data associated with a point.
-pub struct Data<D>(D);
+pub struct Data<D>(pub D);
 
 #[allow(private_interfaces)]
 impl Img<NoData> for f64 {
@@ -820,18 +820,28 @@ impl Img<NoData> for [f64; 2] {
 }
 
 #[allow(private_interfaces)]
-impl<D> Img<D> for (f64, D) {
+impl Img<NoData> for (f64, f64) {
     #[inline]
-    fn into_point(self, t: f64) -> Point<D> {
-        Point::new_unchecked(t, [t, self.0], self.1)
+    fn into_point(self, t: f64) -> Point<NoData> {
+        Point::new_unchecked(t, [self.0, self.1], NoData::new())
     }
 }
 
+/// Make values `(y, Data(d))` be acceptable images of the function.
 #[allow(private_interfaces)]
-impl<D> Img<D> for ([f64; 2], D) {
+impl<D> Img<D> for (f64, Data::<D>) {
     #[inline]
     fn into_point(self, t: f64) -> Point<D> {
-        Point::new_unchecked(t, self.0, self.1)
+        Point::new_unchecked(t, [t, self.0], self.1.0)
+    }
+}
+
+/// Make values `([x,y], Data(d))` be acceptable images of the function.
+#[allow(private_interfaces)]
+impl<D> Img<D> for ([f64; 2], Data::<D>) {
+    #[inline]
+    fn into_point(self, t: f64) -> Point<D> {
+        Point::new_unchecked(t, self.0, self.1.0)
     }
 }
 
@@ -1420,6 +1430,8 @@ new_sampling_fn!(
     /// s.write(&mut BufWriter::new(File::create("target/fun1.dat")?))?;
     /// let s = Sampling::fun(|x| [x.sin(), x.cos()], 0., 4.).build();
     /// s.write(&mut BufWriter::new(File::create("target/fun2.dat")?))?;
+    /// let s = Sampling::fun(|x| x.sin_cos(), 0., 4.).build();
+    /// s.write(&mut BufWriter::new(File::create("target/fun3.dat")?))?;
     /// # Ok(()) }
     /// ```
     fun -> f64,
@@ -1738,7 +1750,7 @@ mod tests {
     use std::{error::Error,
               fs::File,
               io::Write, path::Path};
-    use crate::{BoundingBox, NoData, Point, Sampling};
+    use crate::{BoundingBox, Data, NoData, Point, Sampling};
 
     type R<T> = Result<T, Box<dyn Error>>;
 
@@ -1860,8 +1872,8 @@ mod tests {
 
     #[test]
     fn iter_data() {
-        let s = Sampling::uniform(|x| (x, x as i32), 0., 4.).n(3)
-            .init(&[1.]).init_pt([(3., (0., -1))]).build();
+        let s = Sampling::uniform(|x| (x, Data(x as i32)), 0., 4.).n(3)
+            .init(&[1.]).init_pt([(3., (0., Data(-1)))]).build();
         let expected = vec![
             ([0.,0.], &0), ([1.,1.], &1), ([2.,2.], &2), ([3., 0.], &-1),
             ([4.,4.], &4)];
@@ -1872,8 +1884,8 @@ mod tests {
 
     #[test]
     fn into_iter_data() {
-        let s = Sampling::uniform(|x| (x, x as i32), 0., 4.).n(3)
-            .init(&[1.]).init_pt([(3., (0., -1))]).build();
+        let s = Sampling::uniform(|x| (x, Data(x as i32)), 0., 4.).n(3)
+            .init(&[1.]).init_pt([(3., (0., Data(-1)))]).build();
         let expected = vec![
             ([0.,0.], 0), ([1.,1.], 1), ([2.,2.], 2), ([3., 0.], -1),
             ([4.,4.], 4)];
