@@ -27,7 +27,8 @@ use rgb::*;
 mod approx_priority_queue;
 use approx_priority_queue as pq;
 
-mod list;
+mod linked_list;
+use linked_list as list;
 use list::List;
 
 ////////////////////////////////////////////////////////////////////////
