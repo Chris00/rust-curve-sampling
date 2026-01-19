@@ -12,6 +12,10 @@ pub struct List<T> {
     marker: PhantomData<Box<Node<T>>>,
 }
 
+/// Append only list with (tail) removal.  No insertions.
+// At the moment, this is only an intention.  It is not enforced.
+pub type AppendList<T> = List<T>;
+
 struct Node<T> {
     item: T,
     prev: Option<NonNull<Node<T>>>,
@@ -112,6 +116,50 @@ impl<T> List<T> {
         w.node.as_mut().item = item
     }
 
+    /// Return a reference to the value pointed by `w`.
+    ///
+    /// # Safety
+    /// The witness must point to an element still in the list.  No
+    /// mutable references (created through other witnesses) to the
+    /// same item can exist.
+    pub unsafe fn get(&self, w: &Witness<T>) -> &T {
+        // Because of the way witnesses are implemented, `self` is
+        // technically not required here.  The idea is that witnesses
+        // act like indices to the list, so alone they do not have the
+        // power to mutate it.
+        &w.node.as_ref().item
+    }
+
+    /// Return a mutable reference to the value.
+    ///
+    /// # Safety
+    /// The witness must point to an element still in the list.  No
+    /// mutable references (created through other witnesses) to the
+    /// same item can exist.
+    pub unsafe fn get_mut(&mut self, w: &Witness<T>) -> &mut T {
+        // The witness is simply seen as an index/pointer into the
+        // list.  It is not `w` but the list `self` that is being
+        // mutated.
+        let node = w.node.as_ptr();
+        &mut (*node).item
+    }
+
+    /// Return a witness to the item right after `self`, if any.
+    ///
+    /// # Safety
+    /// The witness must point to an element still in the list.
+    pub unsafe fn next(&self, w: &Witness<T>) -> Option<Witness<T>> {
+        w.node.as_ref().next.map(|node| Witness { node })
+    }
+
+    /// Return a witness to the item right before `self`, if any.
+    ///
+    /// # Safety
+    /// The witness must point to an element still in the list.
+    pub unsafe fn prev(&self, w: &Witness<T>) -> Option<Witness<T>> {
+        w.node.as_ref().prev.map(|node| Witness { node })
+    }
+
     /// Insert `item` after the position in `self` pointed to by `w`.
     /// Return a witness to the new list entry.
     ///
@@ -162,10 +210,13 @@ impl<T> List<T> {
         iter
     }
 
-    pub fn iter_witness_mut(&mut self) -> IterWitnessMut<'_, T> {
-        IterWitnessMut { head: self.head,
-                         //tail: self.tail,
-                         marker: PhantomData }
+    /// Return a iterator over witnesses for this list.
+    ///
+    /// # Safety
+    /// One must ensure that the list is unmodified (its items can
+    /// change) while using the iterator.
+    pub unsafe fn iter_witness(&self) -> IterWitness<T> {
+        IterWitness { head: self.head }
     }
 
 }
@@ -190,11 +241,9 @@ pub struct IntoIter<T> {
     marker: PhantomData<Node<T>>,
 }
 
-/// A mutable iterator over witnesses to elements of the list.
-pub struct IterWitnessMut<'a, T: 'a> {
+/// An iterator over witnesses to elements of the list.
+pub struct IterWitness<T> {
     head: Option<NonNull<Node<T>>>, // None if at end
-    //tail: Option<NonNull<Node<T>>>,
-    marker: PhantomData<&'a mut Node<T>>,
 }
 
 impl<'a, T> Iterator for Iter<'a, T> {
@@ -250,7 +299,7 @@ impl<T> Iterator for IntoIter<T> {
     }
 }
 
-impl<'a, T> Iterator for IterWitnessMut<'a, T> {
+impl<T> Iterator for IterWitness<T> {
     type Item = Witness<T>;
 
     #[inline]
@@ -271,43 +320,6 @@ impl<T> Witness<T> {
     pub fn clone(&self) -> Self {
         Self { node: self.node }
     }
-
-    /// Return a reference to the value.
-    ///
-    /// # Safety
-    /// The witness must point to an element still in the list.  No
-    /// mutable references (created through other witnesses) to the
-    /// same item can exist.
-    pub unsafe fn as_ref(&self) -> &T {
-        &self.node.as_ref().item
-    }
-
-    /// Return a mutable reference to the value.
-    ///
-    /// # Safety
-    /// The witness must point to an element still in the list.  No
-    /// mutable references (created through other witnesses) to the
-    /// same item can exist.
-    pub unsafe fn as_mut(&mut self) -> &mut T {
-        &mut self.node.as_mut().item
-    }
-
-    /// Return a witness to the item right after `self`, if any.
-    ///
-    /// # Safety
-    /// The witness must point to an element still in the list.
-    pub unsafe fn next(&self) -> Option<Witness<T>> {
-        self.node.as_ref().next.map(|node| Witness { node  })
-    }
-
-    /// Return a witness to the item right before `self`, if any.
-    ///
-    /// # Safety
-    /// The witness must point to an element still in the list.
-    pub unsafe fn prev(&self) -> Option<Witness<T>> {
-        self.node.as_ref().prev.map(|node| Witness { node })
-    }
-
 }
 
 
@@ -334,9 +346,9 @@ mod test {
     fn increase_priority() {
         let mut l = List::new();
         l.push_back("a");
-        let mut w = l.push_back("b");
+        let w = l.push_back("b");
         l.push_back("c");
-        unsafe { *w.as_mut() = "d" }
+        unsafe { *l.get_mut(&w) = "d" }
         assert_eq!(l.pop_back(), Some("c"));
         assert_eq!(l.pop_back(), Some("d"));
         assert_eq!(l.pop_back(), Some("a"));
@@ -415,9 +427,9 @@ mod test {
         let mut l = List::new();
         let mut w = l.push_back("a");
         l.push_back("b");
-        assert_eq!(unsafe { w.as_ref() }, &"a");
+        assert_eq!(unsafe { l.get(&w) }, &"a");
         unsafe {
-            *w.as_mut() = "c";
+            *l.get_mut(&w) = "c";
             l.insert_after(&mut w, "d"); }
         let v: Vec<_> = l.iter_mut().collect();
         assert_eq!(v, vec![&"c", &"d", &"b"]);
@@ -428,12 +440,12 @@ mod test {
         let mut l = List::new();
         let w = l.push_back("a");
         l.push_back("b");
-        assert!(unsafe { w.prev() }.is_none());
-        match unsafe { w.next() } {
+        assert!(unsafe { l.prev(&w) }.is_none());
+        match unsafe { l.next(&w) } {
             None => panic!("There is an element after 'a'!"),
             Some(w1) => {
-                assert_eq!(unsafe { w1.as_ref() }, &"b");
-                assert!(unsafe { w1.next() }.is_none());
+                assert_eq!(unsafe { l.get(&w1) }, &"b");
+                assert!(unsafe { l.next(&w1) }.is_none());
             }
         }
     }
