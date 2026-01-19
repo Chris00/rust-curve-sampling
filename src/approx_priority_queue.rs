@@ -1,10 +1,13 @@
 //! A fast max (approximative) priority queue.
 //!
 
-use std::{marker::PhantomData,
-          ptr::NonNull};
+use std::{
+    cell::Cell,
+    marker::PhantomData,
+    rc::Rc,
+};
 
-// Do not implement `Copy` so it stays pinned to its memory location.
+#[derive(Copy, Clone, Debug)]
 struct NodeLoc {
     // Index in the array `PQ.p`
     slot: usize,
@@ -15,25 +18,13 @@ struct NodeLoc {
 #[derive(Debug)]
 pub struct Witness<T> {
     // Pointer to the location information
-    ptr: NonNull<NodeLoc>,
+    loc: Rc<Cell<NodeLoc>>,
     marker: PhantomData<T>,
 }
 
 struct Node<T> {
     item: T,
-    // Owned container with a stable memory location (the actual witness
-    // can refer to) that we can update when the node is moved.
-    loc: OwnedLocPtr,
-}
-
-struct OwnedLocPtr {
-    ptr: NonNull<NodeLoc>,
-}
-
-impl Drop for OwnedLocPtr {
-    fn drop(&mut self) {
-        drop(unsafe { Box::from_raw(self.ptr.as_ptr()) });
-    }
+    loc: Rc<Cell<NodeLoc>>,
 }
 
 /// Priority queue holding elements of type T.
@@ -47,7 +38,7 @@ pub struct PQ<T> {
 
 // For these constants, see [`lib::cost::segment`].
 const PMAX: f64 = 1.;
-const N: usize = 1024;
+const N: usize = 256;
 
 impl<T> PQ<T> {
     /// Return an empty priority queue geared to handle `n` levels of
@@ -88,11 +79,10 @@ impl<T> PQ<T> {
         let p_slot = &mut self.p[slot];
         let i = p_slot.len();
         // Add a location (at a stable memory location).
-        let loc = Box::into_raw(Box::new(NodeLoc { slot, i }));
-        let ptr = unsafe { NonNull::new_unchecked(loc) };
-        p_slot.push(Node { item, loc: OwnedLocPtr { ptr } });
+        let loc = Rc::new(Cell::new(NodeLoc { slot, i }));
+        p_slot.push(Node { item, loc: loc.clone() });
         self.max_slot = self.max_slot.max(slot);
-        Witness { ptr, marker: PhantomData }
+        Witness { loc, marker: PhantomData }
     }
 
     pub fn pop(&mut self) -> Option<T> {
@@ -106,23 +96,25 @@ impl<T> PQ<T> {
     }
 
     pub unsafe fn increase_priority(&mut self, w: &Witness<T>, priority: f64) {
-        let NodeLoc { slot, i } = unsafe { w.ptr.as_ref() };
+        let w_loc = w.loc.get();
+        let slot = w_loc.slot;
+        let i = w_loc.i;
         let new_slot = self.slot_of_priority(priority);
         // FIXME: Here we could also easily lower the priority.  Do we
         // want to do that?
-        if new_slot <= *slot { return }
-        let p_slot = &mut self.p[*slot];
-        let mut n;
+        if new_slot <= slot { return }
+        let p_slot = &mut self.p[slot];
+        let n;
         if i + 1 == p_slot.len() {
             n = p_slot.pop().unwrap();
         } else {
             // Exchange with the last one and update the latter location.
-            n = p_slot.swap_remove(*i);
-            p_slot[*i].loc.ptr.as_mut().i = *i;
+            n = p_slot.swap_remove(i);
+            let loc = p_slot[i].loc.get();
+            p_slot[i].loc.set(NodeLoc { i, .. loc });
         }
         let new_i = self.p[new_slot].len();
-        n.loc.ptr.as_mut().slot = new_slot;
-        n.loc.ptr.as_mut().i = new_i;
+        n.loc.set(NodeLoc { slot: new_slot, i: new_i });
         self.p[new_slot].push(n);
         self.max_slot = self.max_slot.max(new_slot);
     }
