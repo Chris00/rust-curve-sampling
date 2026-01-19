@@ -146,6 +146,7 @@ impl<D> Point<D> {
                 witness: None }
     }
 
+    /// Return a point considered to be a cut in the path.
     #[inline]
     fn cut(t: f64, data: D) -> Self {
         Point { t, xy: [f64::NAN; 2], data,

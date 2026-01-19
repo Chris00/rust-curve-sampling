@@ -19,4 +19,4 @@ miri:
 	cargo miri test
 
 
-.PHONY: clip latex horror
+.PHONY: clip latex horror miri

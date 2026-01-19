@@ -120,7 +120,7 @@ impl<T> Drop for PQ<T> {
             if Node::has_children(root) {
                 Node::drop(unsafe { root.as_ref().child }, root)
             }
-            unsafe { Box::from_raw(root.as_ptr()) }; // drop root
+            drop(unsafe { Box::from_raw(root.as_ptr()) }) // drop root
         }
     }
 }
