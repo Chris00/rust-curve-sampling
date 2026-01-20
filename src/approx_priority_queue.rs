@@ -57,6 +57,15 @@ impl<T> PQ<T> {
         else { self.max_slot as f64 }
     }
 
+    #[cfg(test)]
+    pub fn print_stats(&self) {
+        for (i, pi) in self.p.iter().enumerate() {
+            if !pi.is_empty() {
+                println!("{i:3} {}", pi.len());
+            }
+        }
+    }
+
     fn slot_of_priority(&self, priority: f64) -> usize {
         if priority < 0. { 0 }
         else if priority >= PMAX { N + 1 }

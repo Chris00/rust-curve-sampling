@@ -1989,6 +1989,8 @@ mod tests {
                 .n(self.n).init(self.init.iter()).viewport(vp).build();
             static mut NDAT: usize = 0;
             let ndat = unsafe { NDAT += 1;  NDAT };
+            println!("Horror {ndat}");
+            s.pq.print_stats();
             let dir = Path::new("target");
             let fname = format!("horror{}.dat", ndat);
             s.write(&mut File::create(dir.join(&fname))?)?;
@@ -2001,7 +2003,7 @@ mod tests {
              unset y2tics\n\
              plot [{}:{}] \"{}\" with l lt 5 title \"{}\", \
              \"{}\" with p lt 3 pt 6 ps 0.2 title \"n={}\"\n\
-             set title \"Restricted to viewport [{}:{}]×[{}:{}]\"\n\
+             set title \"#{ndat} Restricted to viewport [{}:{}]×[{}:{}]\"\n\
              set y2tics\n\
              set y2range [-1e-6:]\n\
              plot [{}:{}] [{}:{}] \"{}\" with l lt 5 title \"{}\", \
