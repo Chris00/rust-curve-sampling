@@ -2081,7 +2081,7 @@ mod tests {
                 |x| x.exp().sin(), "sin(exp x)")?,
             p!(xmin: -10., xmax: 10., ymin: 0., ymax: 10.).plot(
                 |x| 1. / x.sin(), "1 / sin x")?,
-            p!(xmin: -6., xmax: 6., ymin: 0., ymax: 2.).plot(
+            p!(xmin: -6., xmax: 6., ymin: -1., ymax: 1.).plot(
                 |x| x.sin() / x, "(sin x)/x")?,
             p!(xmin: -2., xmax: 2., ymin: -15., ymax: 15.).plot(
                 |x| (x.powi(3) - x + 1.).tan() + 1. / (x + 3. * x.exp()),
