@@ -65,10 +65,22 @@ impl<T> List<T> {
         self.head.map(|node| unsafe { &node.as_ref().item })
     }
 
+    /// Return the first item in the list, if not empty, otherwise
+    /// return `None`.
+    pub fn first_mut(&mut self) -> Option<&mut T> {
+        self.head.map(|mut node| unsafe { &mut node.as_mut().item })
+    }
+
     /// Return the last item in the list, if not empty, otherwise
     /// return `None`.
     pub fn last(&self) -> Option<&T> {
         self.tail.map(|node| unsafe { &node.as_ref().item })
+    }
+
+    /// Return the last item in the list, if not empty, otherwise
+    /// return `None`.
+    pub fn last_mut(&mut self) -> Option<&mut T> {
+        self.tail.map(|mut node| unsafe { &mut node.as_mut().item })
     }
 
     /// Remove the final point (if any) of the list.
@@ -210,15 +222,16 @@ impl<T> List<T> {
         iter
     }
 
-    /// Return a iterator over witnesses for this list.
+    /// Iterate on consecutive points (with a peek at the following
+    /// segment so that a cost can be computed).
     ///
     /// # Safety
-    /// One must ensure that the list is unmodified (its items can
-    /// change) while using the iterator.
-    pub unsafe fn iter_witness(&self) -> IterWitness<T> {
-        IterWitness { head: self.head }
+    ///
+    /// The references handled by this iterator can only be used
+    /// before a call to `next` is made.
+    pub unsafe fn iter_segments_mut(&mut self) -> IterSegmentsMut<'_, T> {
+        IterSegmentsMut::new(self)
     }
-
 }
 
 /// An iterator over the elements of the list.
@@ -235,15 +248,16 @@ pub struct IterMut<'a, T: 'a> {
     marker: PhantomData<&'a mut Node<T>>,
 }
 
+pub struct IterSegmentsMut<'a, T: 'a> {
+    node0: Option<NonNull<Node<T>>>, // Start point of the segment
+    node1: Option<NonNull<Node<T>>>, // Endpoint of the segment
+    _marker: PhantomData<&'a mut T>,
+}
+
 /// An iterator over the elements of the list.
 pub struct IntoIter<T> {
     head: Option<NonNull<Node<T>>>, // None if at end
     marker: PhantomData<Node<T>>,
-}
-
-/// An iterator over witnesses to elements of the list.
-pub struct IterWitness<T> {
-    head: Option<NonNull<Node<T>>>, // None if at end
 }
 
 impl<'a, T> Iterator for Iter<'a, T> {
@@ -274,6 +288,41 @@ impl<'a, T> Iterator for IterMut<'a, T> {
     }
 }
 
+impl<'a, T> IterSegmentsMut<'a, T> {
+    fn new(list: &mut List<T>) -> Self {
+        let node0 = list.head;
+        let node1 = node0.and_then(|node0| {
+            unsafe { node0.as_ref().next }
+        });
+        Self { node0, node1, _marker: PhantomData }
+    }
+}
+
+impl<'a, T> Iterator for IterSegmentsMut<'a, T> {
+    // SAFETY: Since the mutable value overlap between calls, this
+    // allows to create multiple mutable references to a given element
+    // by repeatedly using `next`.  Moreover it also allows to create
+    // an exclusive mutable reference and a shared reference to the
+    // same value which is forbidden.
+    type Item = (&'a mut T, Witness<T>, &'a mut T, Option<&'a T>);
+
+    #[inline]
+    fn next(&mut self) -> Option<Self::Item> {
+        self.node0.and_then(|mut node0| {
+            unsafe { node0.as_ref() }.next.map(|mut node1| {
+                let item0 = unsafe { &mut node0.as_mut().item };
+                let witness0 = Witness { node: node0 };
+                let item1 = unsafe { &mut node1.as_mut().item };
+                let node2 = unsafe { node1.as_ref().next };
+                let item2 = node2.map(|n| unsafe { &n.as_ref().item });
+                self.node0 = self.node1;
+                self.node1 = node2;
+                (item0, witness0, item1, item2)
+            })
+        })
+    }
+}
+
 /// If the iterator is not completely consumed, dropping it must free
 /// the remaining memory of the list.
 impl<T> Drop for IntoIter<T> {
@@ -298,19 +347,6 @@ impl<T> Iterator for IntoIter<T> {
         })
     }
 }
-
-impl<T> Iterator for IterWitness<T> {
-    type Item = Witness<T>;
-
-    #[inline]
-    fn next(&mut self) -> Option<Witness<T>> {
-        self.head.map(|node| unsafe {
-            self.head = node.as_ref().next;
-            Witness { node }
-        })
-    }
-}
-
 
 impl<T> Witness<T> {
     /// Return a copy of the witness.  We careful that several

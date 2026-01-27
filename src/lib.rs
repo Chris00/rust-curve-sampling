@@ -1143,18 +1143,17 @@ mod cost {
 /// to by a list-witness so one can update it from the PQ elements.
 /// `p0` is updated with the PQ-witness.
 fn push_segment<D>(
-    s: &mut Sampling<D>,
-    wp0: &list::Witness<Point<D>>, p1: Coord,
+    pq: &mut PQ<D>,
+    p0: &mut Point<D>, w0: &list::Witness<Point<D>>, p1: Coord,
     len: Lengths, in_vp: bool
 ) {
     // FIXME: do we really want to push the segment when `!in_vp`?
     // In not all points are in the queue, one must beware of the
     // validity of witnesses though.
-    let p0 = unsafe { s.path.get(wp0) };
     let cost_segment = cost::segment_vp(p0.coord(), p1, len, in_vp);
     // The segment is referred to by its first point.
-    let w = s.pq.push(cost_segment, wp0.clone());
-    unsafe { s.path.get_mut(wp0) }.witness = Some(w);
+    let w = pq.push(cost_segment, w0.clone());
+    p0.witness = Some(w);
 }
 
 /// With the (new) costs in points `p0` and `p1`, update the position
@@ -1185,48 +1184,40 @@ unsafe fn update_segment<D>(
 /// to the priority queue.
 fn compute<D>(s: &mut Sampling<D>, in_vp: impl Fn(&Point<D>) -> bool) {
     if let Some(len) = s.lengths() {
-        macro_rules! r { ($x: ident) => { unsafe { s.path.get(&$x) } } }
-        macro_rules! m { ($x: ident) => { unsafe { s.path.get_mut(&$x) } } }
-        // Path is not empty.
-        let mut pts = unsafe { s.path.iter_witness() };
-        let mut p0 = pts.next().unwrap();
-        m!(p0).cost = 0.;
-        let mut p0_is_valid = r!(p0).is_valid();
-        let mut p0_in_vp = p0_is_valid && in_vp(r!(p0));
-        let mut pm = match pts.next() {
-            Some(p) => p,
-            None => return };
-        for p1 in pts {
-            let pm_is_valid = r!(pm).is_valid();
+        s.path.first_mut().unwrap().cost = 0.;
+        s.path.last_mut().unwrap().cost = 0.;
+        let segments = unsafe { s.path.iter_segments_mut() };
+        for (p0, w0, pm, p1) in segments {
+            let p0_is_valid = p0.is_valid();
+            let p0_in_vp = p0_is_valid && in_vp(p0);
+            let pm_is_valid = pm.is_valid();
             let pm_in_vp;
-            if pm_is_valid {
-                pm_in_vp = in_vp(r!(pm));
-                if p0_is_valid && r!(p1).is_valid() {
-                    let c0 = r!(p0).coord();
-                    let c1 = r!(p1).coord();
-                    cost::set_middle(c0, m!(pm), c1, len);
-                } else {
-                    m!(pm).cost = cost::HANGING_NODE;
+            if let Some(p1) = p1 {
+                if pm_is_valid {
+                    pm_in_vp = in_vp(pm);
+                    if p0_is_valid && p1.is_valid() {
+                        let c0 = p0.coord();
+                        let c1 = p1.coord();
+                        cost::set_middle(c0, pm, c1, len);
+                    } else {
+                        pm.cost = cost::HANGING_NODE;
+                    }
+                } else { // pm is the location of a cut
+                    pm_in_vp = false;
+                    pm.cost = 0.;
                 }
-            } else { // pm is the location of a cut
-                pm_in_vp = false;
-                m!(pm).cost = 0.;
+                if p0_is_valid || pm_is_valid {
+                    // Add segment [p0, pm] to the PQ and set `p0` witness.
+                    push_segment(&mut s.pq, p0, &w0, pm.coord(), len,
+                        p0_in_vp || pm_in_vp);
+                }
+            } else { // Last segment (no `p1`)
+                if p0_is_valid || pm_is_valid {
+                    let mut vp = p0_in_vp;
+                    if pm.is_valid() { vp = vp || in_vp(pm) };
+                    push_segment(&mut s.pq, p0, &w0, pm.coord(), len, vp);
+                }
             }
-            if p0_is_valid || pm_is_valid {
-                // Add segment [p0, pm] to the PQ and set `p0` witness.
-                push_segment(s, &mut p0, r!(pm).coord(), len,
-                             p0_in_vp || pm_in_vp);
-            }
-            p0 = pm;
-            p0_is_valid = pm_is_valid;
-            p0_in_vp = pm_in_vp;
-            pm = p1;
-        }
-        m!(pm).cost = 0.; // last point
-        if p0_is_valid || r!(pm).is_valid() {
-            let mut vp = p0_in_vp;
-            if r!(pm).is_valid() { vp = vp || in_vp(r!(pm)) };
-            push_segment(s, &mut p0, r!(pm).coord(), len, vp);
         }
     }
 }
@@ -1255,7 +1246,7 @@ fn refine_gen<D>(
         let mut pm = f(t);
         if r!(p0).is_valid() {
             if r!(p1).is_valid() {
-                let mut pm = unsafe { s.path.insert_after(&mut p0, pm) };
+                let pm = unsafe { s.path.insert_after(&mut p0, pm) };
                 let mut pm_in_vp = false;
                 if r!(pm).is_valid() {
                     pm_in_vp = in_vp(r!(pm));
@@ -1296,14 +1287,16 @@ fn refine_gen<D>(
                     }
                 }
                 let vp = pm_in_vp || in_vp(r!(p0));
-                push_segment(s, &mut p0, r!(pm).coord(), len, vp);
+                let cm = r!(pm).coord();
+                push_segment(&mut s.pq, m!(p0), &p0, cm, len, vp);
                 let vp = pm_in_vp || in_vp(r!(p1));
-                push_segment(s, &mut pm, r!(p1).coord(), len, vp);
+                let c1 = r!(p1).coord();
+                push_segment(&mut s.pq, m!(pm), &pm, c1, len, vp);
             } else { // `p0` valid, `p1` invalid (i.e. is a cut)
                 // Thus `p0` is a hanging node.
                 if pm.is_valid() {
                     pm.cost = cost::HANGING_NODE;
-                    let mut pm = unsafe { s.path.insert_after(&mut p0, pm) };
+                    let pm = unsafe { s.path.insert_after(&mut p0, pm) };
                     if let Some(p_1) = prev!(p0) {
                         if r!(p_1).is_valid() {
                             let c_1 = r!(p_1).coord();
@@ -1316,8 +1309,10 @@ fn refine_gen<D>(
                     }
                     let pm_in_vp = in_vp(r!(pm));
                     let vp = pm_in_vp || in_vp(r!(p0));
-                    push_segment(s, &mut p0, r!(pm).coord(), len, vp);
-                    push_segment(s, &mut pm, r!(p1).coord(), len, pm_in_vp)
+                    let cm = r!(pm).coord();
+                    let c1 = r!(p1).coord();
+                    push_segment(&mut s.pq, m!(p0), &p0, cm, len, vp);
+                    push_segment(&mut s.pq, m!(pm), &pm, c1, len, pm_in_vp)
                 } else { // `pm` invalid
                     // Insert only \[`p0`, `pm`\] and forget
                     // \[`pm`, `p1`\].  The cost of `p0` stays
@@ -1336,14 +1331,15 @@ fn refine_gen<D>(
                         }
                     };
                     let vp = in_vp(r!(p0));
-                    push_segment(s, &mut p0, r!(pm).coord(), len, vp)
+                    let cm = r!(pm).coord();
+                    push_segment(&mut s.pq, m!(p0), &p0, cm, len, vp)
                 }
             }
         } else { // `p0` invalid (i.e., cut) ⟹ `p1` valid
             debug_assert!(r!(p1).is_valid());
             if pm.is_valid() {
                 pm.cost = cost::HANGING_NODE;
-                let mut pm = unsafe { s.path.insert_after(&mut p0, pm) };
+                let pm = unsafe { s.path.insert_after(&mut p0, pm) };
                 if let Some(p2) = next!(p1) {
                     if r!(p2).is_valid() {
                         let pm = r!(pm).coord();
@@ -1354,13 +1350,15 @@ fn refine_gen<D>(
                     }
                 }
                 let pm_in_vp = in_vp(r!(pm));
-                push_segment(s, &mut p0, r!(pm).coord(), len, pm_in_vp);
-                push_segment(s, &mut pm, r!(p1).coord(), len,
-                             pm_in_vp || in_vp(r!(p1)))
+                let cm = r!(pm).coord();
+                let c1 = r!(p1).coord();
+                push_segment(&mut s.pq, m!(p0), &p0, cm, len, pm_in_vp);
+                let in_vp = pm_in_vp || in_vp(r!(p1));
+                push_segment(&mut s.pq, m!(pm), &pm, c1, len, in_vp);
             } else { // `pm` invalid ⟹ drop segment \[`p0`, `pm`\].
                 // Cost of `p1` stays `cost::HANGING_NODE`.
                 pm.cost = 0.;
-                let mut pm = {
+                let pm = {
                     if let Some(p_1) = prev!(p0) {
                         if r!(p_1).is_valid() {
                             unsafe { s.path.insert_after(&mut p0, pm) }
@@ -1374,7 +1372,8 @@ fn refine_gen<D>(
                     }
                 };
                 let vp = in_vp(r!(p1));
-                push_segment(s, &mut pm, r!(p1).coord(), len, vp)
+                let c1 = r!(p1).coord();
+                push_segment(&mut s.pq, m!(pm), &pm, c1, len, vp)
             }
         }
     }
