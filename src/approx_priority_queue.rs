@@ -1,5 +1,4 @@
 //! A fast max (approximative) priority queue.
-//!
 
 use std::{
     cell::Cell,
@@ -17,7 +16,6 @@ struct NodeLoc {
 
 #[derive(Debug)]
 pub struct Witness<T> {
-    // Pointer to the location information
     loc: Rc<Cell<NodeLoc>>,
     marker: PhantomData<T>,
 }
@@ -27,28 +25,41 @@ struct Node<T> {
     loc: Rc<Cell<NodeLoc>>,
 }
 
-/// Priority queue holding elements of type T.
+/// Priority queue holding elements of type T and priorities in
+/// `0. .. 1.`.  A nonlinear deformation of the priorities is
+/// performed in order to have a higher scale of small priorities.
 pub struct PQ<T> {
-    // Step size.
-    dp: f64,
     p: Vec<Vec<Node<T>>>,
     // The first nonempty slot (or 0 if the queue is empty).
     max_slot: usize,
 }
 
-// For these constants, see [`lib::cost::segment`].
+// For these constants, see [`lib::cost::segment`].  They were also
+// determined by experimentation, see the `horror` test.
 const PMAX: f64 = 1.;
-const N: usize = 256;
+const PSMALL: f64 = 1e-3;
+const NSMALL: usize = 256;
+const NLARGE: usize = 128;
+const N: usize = NSMALL + NLARGE;
+
+/// Step size for priorities p ∈ [0, PSMALL].
+/// If the priority p is such that DP_SMALL · i < p ≤ DP_SMALL · (i+1)
+/// then is will be in slot i+1.
+const DP_SMALL: f64 = PSMALL / (NSMALL-1) as f64;
+/// Step size for priorities p ∈ ]PSMALL, 1.]
+/// If the priority p is such that
+/// PSMALL + DP_LARGE · i < p ≤ PSMALL + DP_LARGE · (i+1)
+/// then is will be in slot i.
+const DP_LARGE: f64 = (PMAX - PSMALL) / NLARGE as f64;
 
 impl<T> PQ<T> {
     /// Return an empty priority queue geared to handle `n` levels of
-    /// priorities in the range `priority_min .. priority_max`.
+    /// priorities in the range `0. .. 1.`.
     #[inline]
     pub fn new() -> Self {
-        let dp = PMAX / N as f64;
-        let mut p = Vec::with_capacity(N + 2);
-        for _ in 0 .. N + 2 { p.push(vec![]) }
-        PQ { dp, p, max_slot: 0 }
+        let mut p = Vec::with_capacity(N);
+        for _ in 0 .. N { p.push(vec![]) }
+        PQ { p, max_slot: 0 }
     }
 
     #[cfg(test)]
@@ -67,11 +78,14 @@ impl<T> PQ<T> {
     }
 
     fn slot_of_priority(&self, priority: f64) -> usize {
-        if priority < 0. { 0 }
-        else if priority >= PMAX { N + 1 }
-        else {
-            // `sqrt` to have a higher resolution for small priorities
-            (priority.sqrt() / self.dp).ceil() as usize
+        let priority = priority.clamp(0., PMAX);
+        if priority <= PSMALL {
+            if priority <= 0. { return 0 }
+            (priority / DP_SMALL).ceil() as usize
+        } else {
+            if priority >= PMAX { return N-1 }
+            let i = ((priority - PSMALL) / DP_LARGE).ceil() as usize - 1;
+            i + NSMALL
         }
     }
 
@@ -99,12 +113,10 @@ impl<T> PQ<T> {
         while self.max_slot > 0 && self.p[self.max_slot].is_empty() {
             self.max_slot -= 1;
         }
-        match item { None => None,
-                     Some(n) =>  Some(n.item) }
-        // item
+        item.map(|n| n.item)
     }
 
-    pub unsafe fn increase_priority(&mut self, w: &Witness<T>, priority: f64) {
+    pub fn increase_priority(&mut self, w: &Witness<T>, priority: f64) {
         let w_loc = w.loc.get();
         let slot = w_loc.slot;
         let i = w_loc.i;
@@ -165,7 +177,7 @@ mod test {
         q.push(0.1 * PMAX, "a");
         q.push(0.2 * PMAX, "b");
         let w = q.push(0., "c");
-        unsafe { q.increase_priority(&w, 0.3 * PMAX); }
+        q.increase_priority(&w, 0.3 * PMAX);
         assert_eq!(q.pop(), Some("c"));
         assert_eq!(q.pop(), Some("b"));
         assert_eq!(q.pop(), Some("a"));
@@ -181,7 +193,7 @@ mod test {
         q.push(0.2 * PMAX, "b");
         let w = q.push(0., "e");
         assert_eq!(q.pop(), Some("d"));
-        unsafe { q.increase_priority(&w, 0.25 * PMAX); }
+        q.increase_priority(&w, 0.25 * PMAX);
         assert_eq!(q.pop(), Some("c"));
         assert_eq!(q.pop(), Some("e"));
         assert_eq!(q.pop(), Some("b"));
