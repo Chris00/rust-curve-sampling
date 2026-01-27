@@ -596,7 +596,7 @@ impl<D> Sampling<D> {
     /// box will be removed.)
     #[must_use]
     pub fn clip(self, bb: BoundingBox) -> Sampling<Option<D>> {
-        let mut path = list::AppendList::new();
+        let mut path = Vec::new();
         let mut new_len: usize = 0;
         // First point of the current segment, if any.
         let mut p0_opt: Option<Coord> = None;
@@ -618,41 +618,41 @@ impl<D> Sampling<D> {
                         if p0_inside { // p0 ∈ bb with cut before
                             // p0 is already in `s`.
                             if p1_inside {
-                                path.push_back(p1.opt());
+                                path.push(p1.opt());
                                 new_len += 2;
                                 prev_cut = false;
                             } else if
                                 let Some(p) = Self::intersect(p0, p1.coord(), bb) {
                                     let t = p.t;
-                                    path.push_back(p);
-                                    path.push_back(Point::cut(t, None));
+                                    path.push(p);
+                                    path.push(Point::cut(t, None));
                                     new_len += 3;
                                 } else {
                                     let c = Point::cut(p0.t, None);
-                                    path.push_back(c);
+                                    path.push(c);
                                     new_len += 2;
                                 }
                         } else if p1_inside { // p0 ∉ bb, p1 ∈ bb
                             if let Some(p) = Self::intersect(p1.coord(), p0, bb) {
-                                path.push_back(p); // p ≠ p1
+                                path.push(p); // p ≠ p1
                                 new_len += 1;
                             }
-                            path.push_back(p1.opt());
-                            new_len += 1;
+                            path.push(p1.opt());
+                             new_len += 1;
                             prev_cut = false;
                         } else { // p0, p1 ∉ bb but maybe intersection
                             match Self::intersect_seg(p0, p1.coord(), bb) {
                                 Intersection::Seg(q0, q1) => {
                                     let t1 = q1.t;
-                                    path.push_back(q0);
-                                    path.push_back(q1);
-                                    path.push_back(Point::cut(t1, None));
+                                    path.push(q0);
+                                    path.push(q1);
+                                    path.push(Point::cut(t1, None));
                                     new_len += 3;
                                 }
                                 Intersection::Pt(p) => {
                                     let t = p.t;
-                                    path.push_back(p);
-                                    path.push_back(Point::cut(t, None));
+                                    path.push(p);
+                                    path.push(Point::cut(t, None));
                                     new_len += 2;
                                 }
                                 Intersection::Empty => (),
@@ -665,13 +665,13 @@ impl<D> Sampling<D> {
                         p0_opt = Some(p1.coord());
                         if p0_inside {
                             // We keep `p0`.
-                            path.push_back(p1.opt());
+                            path.push(p1.opt());
                         }
                     }
                     (Some(p0), false) => {
                         if p0_inside {
                             // `p0` is already in the `s.path`.
-                            path.push_back(Point::cut(p0.t, None));
+                            path.push(Point::cut(p0.t, None));
                             new_len += 2;
                         }
                         p0_opt = None;
@@ -688,29 +688,29 @@ impl<D> Sampling<D> {
                     p0_opt = Some(p1.coord());
                     p0_inside = bb.contains(&p1); // update for next step
                     if p0_inside { // p0, p1 ∈ bb
-                        path.push_back(p1.opt());
+                        path.push(p1.opt());
                         new_len += 1;
                     } else { // p0 ∈ bb, p1 ∉ bb
                         if let Some(p) = Self::intersect(p0, p1.coord(), bb) {
                             let t = p.t;
-                            path.push_back(p);
-                            path.push_back(Point::cut(t, None));
+                            path.push(p);
+                            path.push(Point::cut(t, None));
                             new_len += 2;
                         } else {
-                            path.push_back(Point::cut(p0.t, None));
+                            path.push(Point::cut(p0.t, None));
                             new_len += 1;
                         }
                         prev_cut = true;
                     }
                 } else { // p1 is invalid (i.e., represent a cut)
                     p0_opt = None;
-                    path.push_back(p1.opt());
+                    path.push(p1.opt());
                     new_len += 1;
                     prev_cut = true
                 }
             }
         }
-        if prev_cut { path.pop_back(); }
+        if prev_cut { path.pop(); }
         let mut s = Sampling::from_list(path.into(), new_len);
         s.set_vp(bb);
         s

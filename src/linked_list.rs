@@ -12,10 +12,6 @@ pub struct List<T> {
     marker: PhantomData<Box<Node<T>>>,
 }
 
-/// Append only list with (tail) removal.  No insertions.
-// At the moment, this is only an intention.  It is not enforced.
-pub type AppendList<T> = List<T>;
-
 struct Node<T> {
     item: T,
     prev: Option<NonNull<Node<T>>>,
@@ -81,24 +77,6 @@ impl<T> List<T> {
     /// return `None`.
     pub fn last_mut(&mut self) -> Option<&mut T> {
         self.tail.map(|mut node| unsafe { &mut node.as_mut().item })
-    }
-
-    /// Remove the final point (if any) of the list.
-    ///
-    /// # Safety
-    /// After popping out a node, its witnesses should not be used.
-    pub fn pop_back(&mut self) -> Option<T> {
-        self.tail.map(|node| unsafe {
-            let node = Box::from_raw(node.as_ptr());
-            self.tail = node.prev;
-            match self.tail {
-                None => self.head = None,
-                // Not creating new mutable (unique!) references
-                // overlapping `element`.
-                Some(tail) => (*tail.as_ptr()).next = None,
-            }
-            node.item
-        })
     }
 
     /// Push a new item to the back of the list.  Return a witness to
@@ -358,6 +336,16 @@ impl<T> Witness<T> {
     }
 }
 
+impl<T> std::convert::From<Vec<T>> for List<T> {
+    fn from(value: Vec<T>) -> Self {
+        let mut l = List::new();
+        for x in value {
+            l.push_back(x);
+        }
+        l
+    }
+}
+
 
 #[cfg(test)]
 mod test {
@@ -372,10 +360,6 @@ mod test {
         l.push_back("c");
         assert_eq!(l.first(), Some(&"a"));
         assert_eq!(l.last(), Some(&"c"));
-        assert_eq!(l.pop_back(), Some("c"));
-        assert_eq!(l.pop_back(), Some("b"));
-        assert_eq!(l.pop_back(), Some("a"));
-        assert_eq!(l.pop_back(), None);
     }
 
     #[test]
@@ -385,10 +369,8 @@ mod test {
         let w = l.push_back("b");
         l.push_back("c");
         unsafe { *l.get_mut(&w) = "d" }
-        assert_eq!(l.pop_back(), Some("c"));
-        assert_eq!(l.pop_back(), Some("d"));
-        assert_eq!(l.pop_back(), Some("a"));
-        assert_eq!(l.pop_back(), None);
+        let v: Vec<_> = l.iter().collect();
+        assert_eq!(v, [&"a", &"d", &"c"])
     }
 
     #[test]
@@ -399,17 +381,6 @@ mod test {
         l.push_back("c");
         let v: Vec<_> = l.iter().collect();
         assert_eq!(v, vec![&"a", &"b", &"c"]);
-    }
-
-    #[test]
-    fn iter_with_pop() {
-        let mut l = List::new();
-        l.push_back("a");
-        l.push_back("b");
-        l.push_back("c");
-        assert_eq!(l.pop_back(), Some("c"));
-        let v: Vec<_> = l.iter().collect();
-        assert_eq!(v, vec![&"a", &"b"]);
     }
 
     #[test]
