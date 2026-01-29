@@ -31,8 +31,6 @@ mod linked_list;
 use linked_list as list;
 use list::List;
 
-mod fast;
-
 ////////////////////////////////////////////////////////////////////////
 //
 // Bounding box
@@ -1044,7 +1042,7 @@ where F: FnMut(f64) -> Y,
 // Cost
 
 mod cost {
-    use super::{Point, Coord, Lengths, fast};
+    use super::{Point, Coord, Lengths};
 
     // The cost of a point is a measure of the curvature at this
     // point.  This requires segments before and after the point.  In
@@ -1086,17 +1084,14 @@ mod cost {
         let dy0m = (y0 - ym) / len.y;
         let dx1m = (x1 - xm) / len.x;
         let dy1m = (y1 - ym) / len.y;
-        // let len0m = dx0m.hypot(dy0m);
-        // let len1m = dx1m.hypot(dy1m);
-        let len0m = fast::hypot(dx0m, dy0m);
-        let len1m = fast::hypot(dx1m, dy1m);
+        let len0m = dx0m.hypot(dy0m);
+        let len1m = dx1m.hypot(dy1m);
         if len0m == 0. || len1m == 0. {
             pm.cost = 0.; // Do not subdivide
         } else {
             let dx = - dx0m * dx1m - dy0m * dy1m;
             let dy = dy0m * dx1m - dx0m * dy1m;
-            // pm.cost = dy.atan2(dx); // ∈ [-π, π]
-            pm.cost = fast::atan2(dy, dx); // ∈ [-π, π]
+            pm.cost = dy.atan2(dx); // ∈ [-π, π]
             debug_assert!(!pm.cost.is_nan());
         }
     }
