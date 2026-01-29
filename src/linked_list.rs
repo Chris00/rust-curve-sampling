@@ -98,14 +98,6 @@ impl<T> List<T> {
         Witness { node }
     }
 
-    /// Replace the item in the list pointed to by `w`.
-    ///
-    /// # Safety
-    /// The node pointed by `w` must be in the list `self`.
-    pub unsafe fn replace(&mut self, w: &mut Witness<T>, item: T) {
-        w.node.as_mut().item = item
-    }
-
     /// Return a reference to the value pointed by `w`.
     ///
     /// # Safety
@@ -472,9 +464,9 @@ mod test {
     fn replace() {
         let mut l = List::new();
         l.push_back("a");
-        let mut w = l.push_back("b");
+        let w = l.push_back("b");
         l.push_back("c");
-        unsafe { l.replace(&mut w, "d"); }
+        unsafe { *l.get_mut(&w) = "d"; }
         let v: Vec<_> = l.iter().collect();
         assert_eq!(v, vec![&"a", &"d", &"c"])
     }

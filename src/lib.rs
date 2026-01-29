@@ -1240,7 +1240,7 @@ fn refine_gen<D>(
             None => break,
             Some(p) => p };
         m!(p0).witness = None; // PQ element it points to just popped.
-        let mut p1 = next!(p0).unwrap();
+        let p1 = next!(p0).unwrap();
         // Refine the segment [p0, p1] inserting a middle point `pm`.
         let t = (r!(p0).t + r!(p1).t) * 0.5;
         let mut pm = f(t);
@@ -1324,7 +1324,7 @@ fn refine_gen<D>(
                         if r!(p1).witness.is_none() {
                             // `p1` is not part of a segment.  One can
                             // replace it by `pm`.
-                            unsafe { s.path.replace(&mut p1, pm) } ;
+                            unsafe { *s.path.get_mut(&p1) = pm } ;
                             p1 // witness for `pm` now.
                         } else {
                             unsafe { s.path.insert_after(&mut p0, pm) }
@@ -1364,7 +1364,7 @@ fn refine_gen<D>(
                             unsafe { s.path.insert_after(&mut p0, pm) }
                         } else {
                             // `p_1` is the cut ending the previous segment.
-                            unsafe { s.path.replace(&mut p0, pm) };
+                            unsafe { *s.path.get_mut(&p0) = pm };
                             p0
                         }
                     } else {
