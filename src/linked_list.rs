@@ -279,7 +279,7 @@ impl<'a, T> Iterator for IterSegmentsMut<'a, T> {
     #[inline]
     fn next(&mut self) -> Option<Self::Item> {
         self.node0.and_then(|mut node0| {
-            unsafe { node0.as_ref() }.next.map(|mut node1| {
+            self.node1.map(|mut node1| {
                 let item0 = unsafe { &mut node0.as_mut().item };
                 let witness0 = Witness { node: node0 };
                 let item1 = unsafe { &mut node1.as_mut().item };
@@ -471,4 +471,17 @@ mod test {
         assert_eq!(v, vec![&"a", &"d", &"c"])
     }
 
+    #[test]
+    fn segments() {
+        let mut l = List::new();
+        l.push_back("a");
+        l.push_back("b");
+        l.push_back("c");
+        let segs: Vec<_> = unsafe { l.iter_segments_mut() }
+            .map(|(e0, _w0, e1, _e2)| {
+                (*e0, *e1)
+            })
+            .collect();
+        assert_eq!(segs, vec![("a", "b"), ("b", "c")]);
+    }
 }
