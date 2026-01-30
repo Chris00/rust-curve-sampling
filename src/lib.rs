@@ -822,7 +822,7 @@ pub trait Img<D> {
 // the context).
 
 /// Wrapper to indicate that a value is a data associated with a point.
-pub struct Data<D>(pub D);
+struct Data<D>(pub D);
 
 #[allow(private_interfaces)]
 impl Img<NoData> for f64 {
