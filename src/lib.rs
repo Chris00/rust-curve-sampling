@@ -880,14 +880,14 @@ macro_rules! new_sampling_fn {
      $(#[$doc: meta])* $struct: ident,
      $wrap_f: ident
     ) => {
-        impl Sampling<NoData> {
+        impl<D> Sampling<D> {
             $(#[$docfn])*
             ///
             /// Panics if `a` or `b` is not finite.
             ///
             $(#[$docfn_extra])*
             #[must_use]
-            pub fn $fun<F, Y, D>(f: F, a: f64, b: f64) -> $struct<F, D>
+            pub fn $fun<F, Y>(f: F, a: f64, b: f64) -> $struct<F, D>
             where F: FnMut(f64) -> Y,
                   Y: Img<D> {
                 if !a.is_finite() {
