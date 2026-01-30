@@ -887,6 +887,7 @@ macro_rules! new_sampling_fn {
             ///
             $(#[$docfn_extra])*
             #[must_use]
+            #[allow(deprecated)]
             pub fn $fun<F, Y>(f: F, a: f64, b: f64) -> $struct<F, D>
             where F: FnMut(f64) -> Y,
                   Y: Img<D> {
@@ -917,6 +918,7 @@ macro_rules! new_sampling_fn {
             init_pt: Vec<Point<D>>,
         }
 
+        #[allow(deprecated)]
         impl<F, Y, D> $struct<F, D>
         where F: FnMut(f64) -> Y,
               Y: Img<D>,
@@ -1504,12 +1506,13 @@ new_sampling_fn!(
     /// # Ok(()) }
     /// ```
     param -> [f64; 2],
-    //#[deprecated(note = "See curve_sampling::Fun instead")]
+    #[deprecated(note = "See curve_sampling::Fun instead")]
     /// Options for sampling the image of functions ℝ → ℝ².
     /// See [`Sampling::param`].
     Param,
     ParamPoint);
 
+#[allow(deprecated)]
 impl<F, Y, D> Param<F, D>
 where F: FnMut(f64) -> Y,
       Y: Img<D> {
