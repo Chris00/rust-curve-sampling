@@ -304,9 +304,9 @@ impl<D> Sampling<D> {
     }
 
     /// Returns an iterator that allows to modify the points and cuts
-    /// of the path.  Unlike [`Self::iter`], this iterates on all the nodes
-    /// even if several cuts (i.e., node with a non finite coordinate)
-    /// follow each other.
+    /// of the path.  Unlike [`Self::iter`], this iterates on all the
+    /// nodes even if several cuts (i.e., node with a non finite
+    /// coordinate) follow each other.
     pub fn iter_mut(&mut self) -> IterMut<'_, D> {
         IterMut { path: self.path.iter_mut() }
     }
@@ -317,8 +317,7 @@ impl<D> Sampling<D> {
         IntoIterData { path: self.path.into_iter() }
     }
 
-    /// Iterator on the x-coordinates of the sampling.
-    /// See [`Self::iter`] for more information.
+    /// Return the X-coordinates of the sampling.
     #[inline]
     pub fn x(&self) -> Vec<f64> {
         let mut v = Vec::with_capacity(self.path.len());
@@ -326,8 +325,7 @@ impl<D> Sampling<D> {
         v
     }
 
-    /// Iterator on the y-coordinates of the sampling.
-    /// See [`Self::iter`] for more information.
+    /// Return the Y-coordinates of the sampling.
     #[inline]
     pub fn y(&self) -> Vec<f64> {
         let mut v = Vec::with_capacity(self.path.len());
@@ -339,7 +337,7 @@ impl<D> Sampling<D> {
 
 /// Iterator on the curve points (and cuts) together with the attached data.
 ///
-/// Created by [`Sampling::iter`].
+/// Created by [`Sampling::iter_data`].
 pub struct IterData<'a, D> {
     path: list::Iter<'a, Point<D>>,
     prev_is_cut: bool,
@@ -430,7 +428,7 @@ impl<'a, D> Iterator for IterMut<'a, D> {
 
 /// Iterator returning the curve points and owned data.
 ///
-/// Created by [`Sampling::iter_data`].
+/// Created by [`Sampling::into_iter_data`].
 pub struct IntoIterData<D> {
     path: list::IntoIter<Point<D>>,
 }
