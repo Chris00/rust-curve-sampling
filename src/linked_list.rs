@@ -269,21 +269,23 @@ impl<'a, T> IterSegmentsMut<'a, T> {
 }
 
 impl<'a, T> Iterator for IterSegmentsMut<'a, T> {
-    // SAFETY: Since the mutable value overlap between calls, this
-    // allows to create multiple mutable references to a given element
-    // by repeatedly using `next`.  Moreover it also allows to create
-    // an exclusive mutable reference and a shared reference to the
-    // same value which is forbidden.
-    type Item = (&'a mut T, Witness<T>, &'a mut T, Option<&'a T>);
+    // SAFETY: The mutable value does not overlap between calls (so no
+    // multiple mutable references to the same value can be created by
+    // multiple calls to `next`) but it is allows to create an
+    // exclusive mutable reference and a shared reference to the same
+    // value which is forbidden.
+    type Item = (&'a T, Witness<T>, &'a mut T, Option<&'a T>);
 
     #[inline]
     fn next(&mut self) -> Option<Self::Item> {
-        self.node0.and_then(|mut node0| {
+        self.node0.and_then(|node0| {
             self.node1.map(|mut node1| {
-                let item0 = unsafe { &mut node0.as_mut().item };
+                let item0 = unsafe { &node0.as_ref().item };
                 let witness0 = Witness { node: node0 };
-                let item1 = unsafe { &mut node1.as_mut().item };
                 let node2 = unsafe { node1.as_ref().next };
+                // The mutable reference to `node1` forbids any other
+                // reference to be created afterward.
+                let item1 = unsafe { &mut node1.as_mut().item };
                 let item2 = node2.map(|n| unsafe { &n.as_ref().item });
                 self.node0 = self.node1;
                 self.node1 = node2;
