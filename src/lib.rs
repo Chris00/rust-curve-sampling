@@ -290,14 +290,14 @@ impl<D> Sampling<D> {
     /// and `y` not NaN, interspaced by "cuts" `[f64::NAN; 2]`.  Two
     /// cuts never follow each other.  Isolated points `p` are given
     /// by ... `[f64::NAN; 2]`, `p`, `None`,...
-    pub fn iter(&self) -> SamplingIter<'_, D> {
-        SamplingIter { iter: self.iter_data() }
+    pub fn iter(&self) -> Iter<'_, D> {
+        Iter { iter: self.iter_data() }
     }
 
     /// Same as [`Self::iter`] but also provides access to the data of
     /// each point.
-    pub fn iter_data(&self) -> SamplingIterData<'_, D> {
-        SamplingIterData {
+    pub fn iter_data(&self) -> IterData<'_, D> {
+        IterData {
             path: self.path.iter(),
             prev_is_cut: true,
         }
@@ -307,14 +307,14 @@ impl<D> Sampling<D> {
     /// of the path.  Unlike [`Self::iter`], this iterates on all the nodes
     /// even if several cuts (i.e., node with a non finite coordinate)
     /// follow each other.
-    pub fn iter_mut(&mut self) -> SamplingIterMut<'_, D> {
-        SamplingIterMut { path: self.path.iter_mut() }
+    pub fn iter_mut(&mut self) -> IterMut<'_, D> {
+        IterMut { path: self.path.iter_mut() }
     }
 
     /// Consumes the sampling and return an iterator on the curve
     /// points and (owned) associated data.
-    pub fn into_iter_data(self) -> SamplingIntoIterData<D> {
-        SamplingIntoIterData { path: self.path.into_iter() }
+    pub fn into_iter_data(self) -> IntoIterData<D> {
+        IntoIterData { path: self.path.into_iter() }
     }
 
     /// Iterator on the x-coordinates of the sampling.
@@ -340,12 +340,12 @@ impl<D> Sampling<D> {
 /// Iterator on the curve points (and cuts) together with the attached data.
 ///
 /// Created by [`Sampling::iter`].
-pub struct SamplingIterData<'a, D> {
+pub struct IterData<'a, D> {
     path: list::Iter<'a, Point<D>>,
     prev_is_cut: bool,
 }
 
-impl<'a, D> Iterator for SamplingIterData<'a, D> {
+impl<'a, D> Iterator for IterData<'a, D> {
     type Item = ([f64; 2], &'a D);
 
     fn next(&mut self) -> Option<Self::Item> {
@@ -391,11 +391,11 @@ impl<'a, D> Iterator for SamplingIterData<'a, D> {
 /// Iterator on the curve points (and cuts).
 ///
 /// Created by [`Sampling::iter`].
-pub struct SamplingIter<'a, D> {
-    iter: SamplingIterData<'a, D>,
+pub struct Iter<'a, D> {
+    iter: IterData<'a, D>,
 }
 
-impl<'a, D> Iterator for SamplingIter<'a, D> {
+impl<'a, D> Iterator for Iter<'a, D> {
     type Item = [f64; 2];
 
     #[inline]
@@ -412,11 +412,11 @@ impl<'a, D> Iterator for SamplingIter<'a, D> {
 /// Mutable iterator on the curve points (and cuts).
 ///
 /// Created by [`Sampling::iter_mut`].
-pub struct SamplingIterMut<'a, D> {
+pub struct IterMut<'a, D> {
     path: list::IterMut<'a, Point<D>>,
 }
 
-impl<'a, D> Iterator for SamplingIterMut<'a, D> {
+impl<'a, D> Iterator for IterMut<'a, D> {
     type Item = &'a mut [f64; 2];
 
     fn next(&mut self) -> Option<Self::Item> {
@@ -431,11 +431,11 @@ impl<'a, D> Iterator for SamplingIterMut<'a, D> {
 /// Iterator returning the curve points and owned data.
 ///
 /// Created by [`Sampling::iter_data`].
-pub struct SamplingIntoIterData<D> {
+pub struct IntoIterData<D> {
     path: list::IntoIter<Point<D>>,
 }
 
-impl<D> Iterator for SamplingIntoIterData<D> {
+impl<D> Iterator for IntoIterData<D> {
     type Item = ([f64; 2], D);
 
     fn next(&mut self) -> Option<Self::Item> {
