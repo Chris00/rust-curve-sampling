@@ -57,8 +57,8 @@ impl BoundingBox {
         !(self.xmin < self.xmax && self.ymin < self.ymax) // NAN ⟹ empty
     }
 
-    /// Return `true` if the point `p` belongs to `bb` (possibly on
-    /// the boundary).
+    /// Return `true` if the point `p` belongs to the box `self`
+    /// (possibly on the boundary).
     #[inline]
     fn contains<D>(&self, p: &Point<D>) -> bool {
         let [x, y] = p.xy;
@@ -118,6 +118,8 @@ struct Point<D> {
 /// Essential elements of a point for the algorithm.  This is to pass
 /// to functions to work around the fact that `Point` is not copy
 /// (when we borrow a point, we implicitly borrow the whole path).
+//
+// It is actually slower to use `Coord` in `Point`.
 #[derive(Clone, Copy, Debug)]
 struct Coord {
     t: f64,
