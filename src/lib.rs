@@ -1240,13 +1240,11 @@ fn refine_gen<D>(
                             let p0 = r!(p0).coord();
                             unsafe { update_segment(&mut s.pq, p_1, p0, len) }
                     }
-                    if let Some(p2) = next!(p1) {
-                        if r!(p2).is_valid() {
-                            let c2 = r!(p2).coord();
-                            cost::set_middle(cm, m!(p1), c2, len);
-                            let p1 = r!(p1);
-                            unsafe { update_segment(&mut s.pq, p1, c2, len) }
-                        }
+                    if let Some(p2) = next!(p1) && r!(p2).is_valid() {
+                        let c2 = r!(p2).coord();
+                        cost::set_middle(cm, m!(p1), c2, len);
+                        let p1 = r!(p1);
+                        unsafe { update_segment(&mut s.pq, p1, c2, len) }
                     }
                 } else { // `pm` invalid ⟹ cut between `p0` and `p1`
                     m!(p0).cost = cost::HANGING_NODE;
@@ -1275,15 +1273,13 @@ fn refine_gen<D>(
                 if pm.is_valid() {
                     pm.cost = cost::HANGING_NODE;
                     let pm = unsafe { s.path.insert_after(&mut p0, pm) };
-                    if let Some(p_1) = prev!(p0) {
-                        if r!(p_1).is_valid() {
-                            let c_1 = r!(p_1).coord();
-                            let pm = r!(pm).coord();
-                            cost::set_middle(c_1, m!(p0), pm, len);
-                            let p_1 = r!(p_1);
-                            let p0 = r!(p0).coord();
-                            unsafe{ update_segment(&mut s.pq, p_1, p0, len) }
-                        }
+                    if let Some(p_1) = prev!(p0) && r!(p_1).is_valid() {
+                        let c_1 = r!(p_1).coord();
+                        let pm = r!(pm).coord();
+                        cost::set_middle(c_1, m!(p0), pm, len);
+                        let p_1 = r!(p_1);
+                        let p0 = r!(p0).coord();
+                        unsafe{ update_segment(&mut s.pq, p_1, p0, len) }
                     }
                     let pm_in_vp = in_vp(r!(pm));
                     let vp = pm_in_vp || in_vp(r!(p0));
@@ -1318,14 +1314,12 @@ fn refine_gen<D>(
             if pm.is_valid() {
                 pm.cost = cost::HANGING_NODE;
                 let pm = unsafe { s.path.insert_after(&mut p0, pm) };
-                if let Some(p2) = next!(p1) {
-                    if r!(p2).is_valid() {
-                        let pm = r!(pm).coord();
-                        let p2 = r!(p2).coord();
-                        cost::set_middle(pm, m!(p1), p2, len);
-                        let p1 = r!(p1);
-                        unsafe{ update_segment(&mut s.pq, p1, p2, len) }
-                    }
+                if let Some(p2) = next!(p1) && r!(p2).is_valid() {
+                    let pm = r!(pm).coord();
+                    let p2 = r!(p2).coord();
+                    cost::set_middle(pm, m!(p1), p2, len);
+                    let p1 = r!(p1);
+                    unsafe{ update_segment(&mut s.pq, p1, p2, len) }
                 }
                 let pm_in_vp = in_vp(r!(pm));
                 let cm = r!(pm).coord();

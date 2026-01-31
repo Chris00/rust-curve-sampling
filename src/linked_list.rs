@@ -114,7 +114,7 @@ impl<T> List<T> {
         // technically not required here.  The idea is that witnesses
         // act like indices to the list, so alone they do not have the
         // power to mutate it.
-        &w.node.as_ref().item
+        & unsafe { w.node.as_ref() }.item
     }
 
     /// Return a mutable reference to the value.
@@ -128,7 +128,7 @@ impl<T> List<T> {
         // list.  It is not `w` but the list `self` that is being
         // mutated.
         let node = w.node.as_ptr();
-        &mut (*node).item
+        unsafe { &mut (*node).item }
     }
 
     /// Return a witness to the item right after `self`, if any.
@@ -136,7 +136,8 @@ impl<T> List<T> {
     /// # Safety
     /// The witness must point to an element still in the list.
     pub unsafe fn next(&self, w: &Witness<T>) -> Option<Witness<T>> {
-        w.node.as_ref().next.map(|node| Witness { node })
+        unsafe { w.node.as_ref() }.next
+            .map(|node| Witness { node })
     }
 
     /// Return a witness to the item right before `self`, if any.
@@ -144,7 +145,8 @@ impl<T> List<T> {
     /// # Safety
     /// The witness must point to an element still in the list.
     pub unsafe fn prev(&self, w: &Witness<T>) -> Option<Witness<T>> {
-        w.node.as_ref().prev.map(|node| Witness { node })
+        unsafe { w.node.as_ref() }.prev
+            .map(|node| Witness { node })
     }
 
     /// Insert `item` after the position in `self` pointed to by `w`.
@@ -163,14 +165,18 @@ impl<T> List<T> {
         let new = Node {
             item,
             prev: Some(w.node),
-            next: w.node.as_ref().next };
-        let new = NonNull::new_unchecked(
-            Box::into_raw(Box::new(new)));
-        match w.node.as_ref().next {
+            next: unsafe { w.node.as_ref().next }
+        };
+        let new = unsafe {
+            NonNull::new_unchecked(Box::into_raw(Box::new(new)))
+        };
+        match unsafe { w.node.as_ref() }.next {
             None => self.tail = Some(new), // last node
-            Some(mut next) => next.as_mut().prev = Some(new),
+            Some(mut next) => {
+                unsafe { next.as_mut() }.prev = Some(new)
+            }
         }
-        w.node.as_mut().next = Some(new);
+        unsafe { w.node.as_mut() }.next = Some(new);
         self.len += 1;
         Witness { node: new }
     }
