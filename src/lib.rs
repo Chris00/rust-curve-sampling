@@ -87,20 +87,6 @@ impl BoundingBox {
 //
 // Sampling datastructure
 
-/// Type indicating that no data is associated with the sampling.
-#[derive(Clone, Debug)]
-pub struct NoData {
-    // Non-constructible outside this library (i.e. can only be used
-    // as a type annotation).
-    marker: PhantomData<()>,
-}
-
-impl NoData {
-    fn new() -> Self {
-        Self { marker: PhantomData }
-    }
-}
-
 /// A 2D point with coordinates (`x`, `y`) supposed to be given by a
 /// function evaluated at "time" `t`.  A path is a sequence of points.
 /// Points that are invalid (see [`Point::is_valid`]) are considered
@@ -189,9 +175,11 @@ impl<D> Point<D> {
     }
 }
 
-/// A 2D sampling.  This can be thought as a path, with possible
-/// "cuts" because of discontinuities or leaving the domain of the
-/// (parametric) function describing the path.
+/// A sampling of a 2D curve.  This can be thought of as a 2D path,
+/// with possible "cuts" due to discontinuities or leaving the domain
+/// of the (parametric) function describing the path.
+///
+/// Additional data of type `D` may be attached to each point.
 pub struct Sampling<D> {
     // Priority queue of segments.  The value points to the first
     // `Point` of the segment (thus its .next pointer must not be
@@ -294,8 +282,8 @@ impl<D> Sampling<D> {
         Iter { iter: self.iter_data() }
     }
 
-    /// Same as [`Self::iter`] but also provides access to the data of
-    /// each point.
+    /// Same as [`Self::iter`] but also provides a reference to the
+    /// data associated to each point.
     pub fn iter_data(&self) -> IterData<'_, D> {
         IterData {
             path: self.path.iter(),
@@ -306,7 +294,8 @@ impl<D> Sampling<D> {
     /// Returns an iterator that allows to modify the points and cuts
     /// of the path.  Unlike [`Self::iter`], this iterates on all the
     /// nodes even if several cuts (i.e., node with a non finite
-    /// coordinate) follow each other.
+    /// coordinate) follow each other.  The data associated to each
+    /// point is unmodified.
     pub fn iter_mut(&mut self) -> IterMut<'_, D> {
         IterMut { path: self.path.iter_mut() }
     }
@@ -761,68 +750,75 @@ where Y: Img<D> {
 // attached data.
 
 /// Suitable images of functions that can be used to generate samplings.
-#[allow(private_interfaces)]
-// This trait is not implementable from the outside so it must uphold
-// its invariants for example `Point.t` must be the `t` provided and
-// be finite,...
+//
+// This trait is not implementable from the outside so it can uphold
+// `Point` invariants for example `Point.t` must be the `t` provided
+// and be finite,...
 pub trait Img<D> {
     /// Transform a map `f64` → `self` into the internal value `Point`.
     /// It will only be used with finite `t`.
+    #[allow(private_interfaces)]
     fn into_point(self, t: f64) -> Point<D>;
 }
-// Another possible trait could have been one that has a projection
-// from the data on the coordinates X-Y — fn xy(&self) → [f64; 2] —
-// but usually that data `D` requires additional context to perform
-// the conversion (for example an EDP FEM solution u needs to know the
-// mesh and inner product to compute ‖u‖) so it is better that the
-// function we evaluate performs the conversion (it usually possesses
-// the context).
 
-/// Wrapper to indicate that a value is a data associated with a point.
-struct Data<D>(pub D);
+/// Type indicating that no data is associated with the sampling.
+#[derive(Clone, Debug)]
+pub struct NoData {
+    // Non-constructible outside this library (i.e. can only be used
+    // as a type annotation).
+    marker: PhantomData<()>,
+}
 
-#[allow(private_interfaces)]
+impl NoData {
+    fn new() -> Self { Self { marker: PhantomData } }
+}
+
 impl Img<NoData> for f64 {
+    #[allow(private_interfaces)]
     #[inline]
     fn into_point(self, t: f64) -> Point<NoData> {
         Point::new_unchecked(t, [t, self], NoData::new())
     }
 }
 
-#[allow(private_interfaces)]
 impl Img<NoData> for [f64; 2] {
+    #[allow(private_interfaces)]
     #[inline]
     fn into_point(self, t: f64) -> Point<NoData> {
         Point::new_unchecked(t, self, NoData::new())
     }
 }
 
-#[allow(private_interfaces)]
 impl Img<NoData> for (f64, f64) {
+    #[allow(private_interfaces)]
     #[inline]
     fn into_point(self, t: f64) -> Point<NoData> {
         Point::new_unchecked(t, [self.0, self.1], NoData::new())
     }
 }
 
-/// Make values `(y, Data(d))` be acceptable images of the function.
-#[allow(private_interfaces)]
+/// Wrapper to indicate that a value is a data associated with a point.
+///
+/// See [`Sampling::fun`] for an example.
+pub struct Data<D>(pub D);
+
+/// Values `(y, Data(d))` are acceptable images (see [`Sampling::fun`]).
 impl<D> Img<D> for (f64, Data::<D>) {
+    #[allow(private_interfaces)]
     #[inline]
     fn into_point(self, t: f64) -> Point<D> {
         Point::new_unchecked(t, [t, self.0], self.1.0)
     }
 }
 
-/// Make values `([x,y], Data(d))` be acceptable images of the function.
-#[allow(private_interfaces)]
+/// Values `([x,y], Data(d))` are acceptable images (see [`Sampling::fun`]).
 impl<D> Img<D> for ([f64; 2], Data::<D>) {
+    #[allow(private_interfaces)]
     #[inline]
     fn into_point(self, t: f64) -> Point<D> {
         Point::new_unchecked(t, self.0, self.1.0)
     }
 }
-
 
 ////////////////////////////////////////////////////////////////////////
 //
@@ -1407,12 +1403,13 @@ impl<D> Sampling<D> {
 new_sampling_fn!(
     /// When `f` returns `f64` (resp. `[f64; 2]`), construct a
     /// sampling of the *graph* (resp. the *image*) of `f` on the
-    /// interval \[`a`, `b`\] by evaluating `f` at `n` points.  The
-    /// function `f` may also provide additional data by returning
-    /// `(f64, D)` or `([f64; 2], D)` (the type `D` will be
-    /// instantiated to the type of that data).
+    /// interval \[`a`, `b`\] by evaluating `f` at `n` points (see
+    /// [`Fun::n`]).  The function `f` may also provide additional
+    /// data by returning `(y, Data(d))` of type `(f64, Data::<D>)` or
+    /// `([x, y], Data(d))` of type `([f64; 2], Data::<D>)` (the type
+    /// parameter `D` will be inferred from the type of the data `d`).
     ,
-    /// # Example
+    /// # Examples
     ///
     /// ```
     /// use std::{fs::File, io::BufWriter};
@@ -1426,8 +1423,24 @@ new_sampling_fn!(
     /// s.write(&mut BufWriter::new(File::create("target/fun3.dat")?))?;
     /// # Ok(()) }
     /// ```
+    ///
+    /// Sampling with associated data:
+    ///
+    /// ```
+    /// use curve_sampling::{Sampling, Data};
+    /// # fn main() -> Result<(), Box<dyn std::error::Error>> {
+    /// fn f(x: f64) -> [f64; 3] {
+    ///     [x, x*x, x*x*x]
+    /// }
+    /// let s = Sampling::fun(|x| {
+    ///     let fx = f(x);
+    ///     ([fx[0], fx[1]], Data(fx))
+    /// }, 0., 1.).build();
+    /// // ...
+    /// # Ok(()) }
+    /// ```
     fun -> f64,
-    /// Options for sampling graphs of functions ℝ → ℝ.
+    /// Options for sampling graphs of functions ℝ → ℝ and ℝ → ℝ².
     /// See [`Sampling::fun`].
     Fun,
     FnPoint);
