@@ -14,4 +14,8 @@ categories = ["mathematics", "science"]
 exclude = [".github", "auto/"]
 
 [dependencies]
+num-complex = { version = "0.4.6", optional = true }
 rgb = "0.8.32"
+
+[features]
+num-complex = ["dep:num-complex"]

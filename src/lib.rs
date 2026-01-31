@@ -750,6 +750,8 @@ where Y: Img<D> {
 // attached data.
 
 /// Suitable images of functions that can be used to generate samplings.
+///
+/// See e.g. [`Sampling::uniform`] and [`Sampling::fun`].
 //
 // This trait is not implementable from the outside so it can uphold
 // `Point` invariants for example `Point.t` must be the `t` provided
@@ -797,6 +799,15 @@ impl Img<NoData> for (f64, f64) {
     }
 }
 
+#[cfg(feature = "num-complex")]
+impl Img<num_complex::Complex<f64>> for num_complex::Complex<f64> {
+    #[allow(private_interfaces)]
+    #[inline]
+    fn into_point(self, t: f64) -> Point<num_complex::Complex<f64>> {
+        Point::new_unchecked(t, [self.re, self.im], self)
+    }
+}
+
 /// Wrapper to indicate that a value is a data associated with a point.
 ///
 /// See [`Sampling::fun`] for an example.
@@ -819,6 +830,16 @@ impl<D> Img<D> for ([f64; 2], Data::<D>) {
         Point::new_unchecked(t, self.0, self.1.0)
     }
 }
+
+#[cfg(feature = "num-complex")]
+impl<D> Img<D> for (num_complex::Complex<f64>, Data::<D>) {
+    #[allow(private_interfaces)]
+    #[inline]
+    fn into_point(self, t: f64) -> Point<D> {
+        Point::new_unchecked(t, [self.0.re, self.0.im], self.1.0)
+    }
+}
+
 
 ////////////////////////////////////////////////////////////////////////
 //
@@ -947,6 +968,9 @@ macro_rules! new_sampling_fn {
 new_sampling_fn!(
     /// Create a sampling for the graph of `f` on the interval
     /// \[`a`, `b`\] with evenly spaced values of the argument.
+    ///
+    /// See [`Sampling::fun`] for more documentation on the possible
+    /// return values of `f`.
     ,
     /// # Example
     ///
@@ -1408,6 +1432,9 @@ new_sampling_fn!(
     /// data by returning `(y, Data(d))` of type `(f64, Data::<D>)` or
     /// `([x, y], Data(d))` of type `([f64; 2], Data::<D>)` (the type
     /// parameter `D` will be inferred from the type of the data `d`).
+    ///
+    /// If the feature `num-complex` is enabled, complex numbers may
+    /// also be used.
     ,
     /// # Examples
     ///
@@ -1439,6 +1466,22 @@ new_sampling_fn!(
     /// // ...
     /// # Ok(()) }
     /// ```
+    ///
+    #[cfg_attr(feature = "num-complex", doc = "
+With the feature `num-complex`, complex-valued functions may be used directly.
+
+```
+use num_complex::Complex64 as C64;
+use curve_sampling::{Sampling, Data};
+# fn main() -> Result<(), Box<dyn std::error::Error>> {
+fn f(t: f64) -> C64 {
+    C64::i().powf(t)
+}
+let s = Sampling::fun(f, 0., 1.).build();
+// ...
+# Ok(()) }
+```
+")]
     fun -> f64,
     /// Options for sampling graphs of functions ℝ → ℝ and ℝ → ℝ².
     /// See [`Sampling::fun`].

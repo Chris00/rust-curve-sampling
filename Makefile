@@ -1,4 +1,5 @@
-
+doc:
+	cargo doc --all-features
 
 clip:
 	cargo run --example clip
@@ -19,4 +20,4 @@ miri:
 	cargo miri test
 
 
-.PHONY: clip latex horror miri
+.PHONY: doc clip latex horror miri
