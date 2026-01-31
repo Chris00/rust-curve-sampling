@@ -9,6 +9,7 @@ use std::{marker::PhantomData,
 pub struct List<T> {
     head: Option<NonNull<Node<T>>>,
     tail: Option<NonNull<Node<T>>>, // None ⇔ head = None
+    len: usize, // number of elements.
     marker: PhantomData<Box<Node<T>>>,
 }
 
@@ -49,11 +50,14 @@ pub struct Witness<T> {
 impl<T> List<T> {
     /// Return a new empty list.
     pub fn new() -> List<T> {
-        List { head: None,  tail: None,  marker: PhantomData }
+        List { head: None,  tail: None, len: 0, marker: PhantomData }
     }
 
     /// Return `true` iff the list is empty.
     pub fn is_empty(&self) -> bool { self.head.is_none() }
+
+    /// Return the number of elements in `self`.
+    pub fn len(&self) -> usize { self.len }
 
     /// Return the first item in the list, if not empty, otherwise
     /// return `None`.
@@ -95,6 +99,7 @@ impl<T> List<T> {
                 node0.as_mut().next = Some(node) },
         }
         self.tail = Some(node);
+        self.len += 1;
         Witness { node }
     }
 
@@ -149,8 +154,9 @@ impl<T> List<T> {
     /// The item pointed by `w` should still be in the list `self`.
     /// Also, since we modify nearby nodes, no references should be
     /// active for the current or nearby points.
-    pub unsafe fn insert_after(&mut self, w: &mut Witness<T>, item: T)
-                               -> Witness<T> {
+    pub unsafe fn insert_after(
+        &mut self, w: &mut Witness<T>, item: T
+    ) -> Witness<T> {
         // We use a mutable reference for `w` to have exclusive access
         // as it disallows all references obtained through `Witness`
         // methods.  This lower the potential for misuse.
@@ -165,24 +171,22 @@ impl<T> List<T> {
             Some(mut next) => next.as_mut().prev = Some(new),
         }
         w.node.as_mut().next = Some(new);
+        self.len += 1;
         Witness { node: new }
     }
 
     pub fn iter(&self) -> Iter<'_, T> {
-        Iter { head: self.head,
-               //tail: self.tail,
-               marker: PhantomData }
+        Iter { head: self.head, len: self.len, marker: PhantomData }
     }
 
     pub fn iter_mut(&mut self) -> IterMut<'_, T> {
-        IterMut { head: self.head,
-                  //tail: self.tail,
-                  marker: PhantomData }
+        IterMut { head: self.head, len: self.len, marker: PhantomData }
     }
 
     pub fn into_iter(mut self) -> IntoIter<T> {
         let iter = IntoIter {
             head: self.head,
+            len: self.len,
             marker: PhantomData
         };
         // Prevent the nodes of `self` to be freed at the end of this
@@ -207,14 +211,14 @@ impl<T> List<T> {
 /// An iterator over the elements of the list.
 pub struct Iter<'a, T: 'a> {
     head: Option<NonNull<Node<T>>>, // None if at end
-    //tail: Option<NonNull<Node<T>>>,
+    len: usize,
     marker: PhantomData<&'a Node<T>>,
 }
 
 /// A mutable iterator over the elements of the list.
 pub struct IterMut<'a, T: 'a> {
     head: Option<NonNull<Node<T>>>, // None if at end
-    //tail: Option<NonNull<Node<T>>>,
+    len: usize,
     marker: PhantomData<&'a mut Node<T>>,
 }
 
@@ -227,6 +231,7 @@ pub struct IterSegmentsMut<'a, T: 'a> {
 /// An iterator over the elements of the list.
 pub struct IntoIter<T> {
     head: Option<NonNull<Node<T>>>, // None if at end
+    len: usize,
     marker: PhantomData<Node<T>>,
 }
 
@@ -239,10 +244,17 @@ impl<'a, T> Iterator for Iter<'a, T> {
             // Need an unbound lifetime to get 'a
             let node = &*node.as_ptr();
             self.head = node.next;
+            self.len -= 1;
             &node.item
         })
     }
+
+    fn size_hint(&self) -> (usize, Option<usize>) {
+        (self.len, Some(self.len))
+    }
 }
+
+impl<'a, T> ExactSizeIterator for Iter<'a, T> {}
 
 impl<'a, T> Iterator for IterMut<'a, T> {
     type Item = &'a mut T;
@@ -253,10 +265,17 @@ impl<'a, T> Iterator for IterMut<'a, T> {
             // Need an unbound lifetime to get 'a
             let node = &mut *node.as_ptr();
             self.head = node.next;
+            self.len -= 1;
             &mut node.item
         })
     }
+
+    fn size_hint(&self) -> (usize, Option<usize>) {
+        (self.len, Some(self.len))
+    }
 }
+
+impl<'a, T> ExactSizeIterator for IterMut<'a, T> {}
 
 impl<'a, T> IterSegmentsMut<'a, T> {
     fn new(list: &mut List<T>) -> Self {
@@ -315,10 +334,17 @@ impl<T> Iterator for IntoIter<T> {
         self.head.map(|node| {
             let node = unsafe { Box::from_raw(node.as_ptr()) };
             self.head = node.next;
+            self.len -= 1;
             node.item
         })
     }
+
+    fn size_hint(&self) -> (usize, Option<usize>) {
+        (self.len, Some(self.len))
+    }
 }
+
+impl<T> ExactSizeIterator for IntoIter<T> {}
 
 impl<T> Witness<T> {
     /// Return a copy of the witness.  We careful that several
@@ -354,6 +380,7 @@ mod test {
         l.push_back("c");
         assert_eq!(l.first(), Some(&"a"));
         assert_eq!(l.last(), Some(&"c"));
+        assert_eq!(l.len(), 3);
     }
 
     #[test]
@@ -364,7 +391,8 @@ mod test {
         l.push_back("c");
         unsafe { *l.get_mut(&w) = "d" }
         let v: Vec<_> = l.iter().collect();
-        assert_eq!(v, [&"a", &"d", &"c"])
+        assert_eq!(v, [&"a", &"d", &"c"]);
+        assert_eq!(l.len(), 3);
     }
 
     #[test]
@@ -375,6 +403,7 @@ mod test {
         l.push_back("c");
         let v: Vec<_> = l.iter().collect();
         assert_eq!(v, vec![&"a", &"b", &"c"]);
+        assert_eq!(l.len(), 3);
     }
 
     #[test]
@@ -385,6 +414,7 @@ mod test {
         l.push_back("c");
         let v: Vec<_> = l.iter_mut().collect();
         assert_eq!(v, vec![&"a", &"b", &"c"]);
+        assert_eq!(l.len(), 3);
     }
 
     #[test]
@@ -407,6 +437,7 @@ mod test {
         assert_eq!(i.next(), Some("a".to_string()));
         // Do not consume all of `i` so that Miri can check whether
         // the nodes are indeed freed by dropping `i`.
+        assert_eq!(i.size_hint(), (2, Some(2)));
     }
 
     #[test]

@@ -17,7 +17,13 @@
 //! [LaTeX]: https://www.latex-project.org/
 //! [TikZ]: https://tikz.dev/
 
-use std::{cell::{Cell, RefCell}, fmt::{self, Display, Formatter}, io::{self, Write}, marker::PhantomData, ops::ControlFlow};
+use std::{
+    cell::RefCell,
+    fmt::{self, Display, Formatter},
+    io::{self, Write},
+    marker::PhantomData,
+    ops::ControlFlow,
+};
 use rgb::*;
 
 // mod fibonacci_heap;
@@ -194,9 +200,6 @@ pub struct Sampling<D> {
     // not null, it means that the costs need to to be updated.
     pq: PQ<D>,
     path: List<Point<D>>,
-    // Guess on the path length (to allocate vectors) without making
-    // `self` mutable (which the caller would not understand).
-    guess_len: Cell<usize>,
     vp: Option<BoundingBox>, // viewport (zone of interest)
 }
 
@@ -208,7 +211,6 @@ impl<D: Clone> Clone for Sampling<D> {
         // Thus start with an empty queue.
         Self { pq: PQ::new(),
                path: self.path.clone(),
-               guess_len: self.guess_len.get().into(),
                vp: self.vp }
     }
 }
@@ -232,7 +234,6 @@ impl<D> Sampling<D> {
     pub(crate) fn empty() -> Self {
         Self { pq: PQ::new(),
                path: List::new(),
-               guess_len: 0.into(),
                vp: None }
     }
 
@@ -241,14 +242,13 @@ impl<D> Sampling<D> {
         debug_assert!(p.t.is_finite() && p.xy.iter().all(|z| z.is_finite()));
         let mut path = List::new();
         path.push_back(p);
-        Self { pq: PQ::new(), path, guess_len: 1.into(), vp: None }
+        Self { pq: PQ::new(), path, vp: None }
     }
 
-    fn from_list(path: List<Point<D>>, guess_len: usize) -> Self {
+    fn from_list(path: List<Point<D>>) -> Self {
         Self {
             pq: PQ::new(),
             path,
-            guess_len: guess_len.into(),
             vp: None,
         }
     }
@@ -279,6 +279,11 @@ impl<D> Sampling<D> {
         Some(Lengths { t: (p1.t - p0.t).abs(), x: len_x, y: len_y })
     }
 
+    /// Return the number of points and "cuts" in the sampling.
+    pub fn len(&self) -> usize {
+        self.path.len()
+    }
+
     /// Returns an iterator on the points (and cuts) of the path.
     /// More precisely, a path is made of continuous segments whose
     /// points are given by contiguous values `[x,y]` with both `x`
@@ -286,13 +291,7 @@ impl<D> Sampling<D> {
     /// cuts never follow each other.  Isolated points `p` are given
     /// by ... `[f64::NAN; 2]`, `p`, `None`,...
     pub fn iter(&self) -> SamplingIter<'_, D> {
-        SamplingIter {
-            iter: SamplingIterData {
-                path: self.path.iter(),
-                prev_is_cut: true,
-                guess_len: self.guess_len.get(),
-            }
-        }
+        SamplingIter { iter: self.iter_data() }
     }
 
     /// Same as [`Self::iter`] but also provides access to the data of
@@ -301,7 +300,6 @@ impl<D> Sampling<D> {
         SamplingIterData {
             path: self.path.iter(),
             prev_is_cut: true,
-            guess_len: self.guess_len.get(),
         }
     }
 
@@ -310,26 +308,20 @@ impl<D> Sampling<D> {
     /// even if several cuts (i.e., node with a non finite coordinate)
     /// follow each other.
     pub fn iter_mut(&mut self) -> SamplingIterMut<'_, D> {
-        SamplingIterMut {
-            path: self.path.iter_mut(),
-            guess_len: self.guess_len.get(),
-        }
+        SamplingIterMut { path: self.path.iter_mut() }
     }
 
     /// Consumes the sampling and return an iterator on the curve
     /// points and (owned) associated data.
     pub fn into_iter_data(self) -> SamplingIntoIterData<D> {
-        SamplingIntoIterData {
-            path: self.path.into_iter(),
-            guess_len: self.guess_len.get(),
-        }
+        SamplingIntoIterData { path: self.path.into_iter() }
     }
 
     /// Iterator on the x-coordinates of the sampling.
     /// See [`Self::iter`] for more information.
     #[inline]
     pub fn x(&self) -> Vec<f64> {
-        let mut v = Vec::with_capacity(self.guess_len.get());
+        let mut v = Vec::with_capacity(self.path.len());
         for [x, _] in self.iter() { v.push(x) }
         v
     }
@@ -338,7 +330,7 @@ impl<D> Sampling<D> {
     /// See [`Self::iter`] for more information.
     #[inline]
     pub fn y(&self) -> Vec<f64> {
-        let mut v = Vec::with_capacity(self.guess_len.get());
+        let mut v = Vec::with_capacity(self.path.len());
         for [_, y] in self.iter() { v.push(y) }
         v
     }
@@ -351,7 +343,6 @@ impl<D> Sampling<D> {
 pub struct SamplingIterData<'a, D> {
     path: list::Iter<'a, Point<D>>,
     prev_is_cut: bool,
-    guess_len: usize,
 }
 
 impl<'a, D> Iterator for SamplingIterData<'a, D> {
@@ -361,27 +352,25 @@ impl<'a, D> Iterator for SamplingIterData<'a, D> {
         match self.path.next() {
             None => None,
             Some(p) => {
-                self.guess_len -= 1;
                 if p.is_valid() {
                     self.prev_is_cut = false;
                     Some((p.xy, &p.data))
                 } else if self.prev_is_cut {
                     // Find the next valid point.
-                    let r = self.path.try_fold(0, |n, p| {
+                    // FIXME: use `try_find` once stabilized.
+                    let r = self.path.try_fold((), |_, p| {
                         if p.is_valid() {
-                            ControlFlow::Break((n, p))
+                            ControlFlow::Break(((), p))
                         } else {
-                            ControlFlow::Continue(n+1)
+                            ControlFlow::Continue(())
                         }
                     });
                     match r {
                         ControlFlow::Continue(_) => {
                             // Iterator exhausted
-                            self.guess_len = 0;
                             None
                         }
-                        ControlFlow::Break((n, p)) => {
-                            self.guess_len -= n;
+                        ControlFlow::Break((_, p)) => {
                             self.prev_is_cut = false;
                             Some((p.xy, &p.data))
                         }
@@ -395,7 +384,7 @@ impl<'a, D> Iterator for SamplingIterData<'a, D> {
     }
 
     fn size_hint(&self) -> (usize, Option<usize>) {
-        (0, Some(self.guess_len))
+        (0, Some(self.path.len()))
     }
 }
 
@@ -425,48 +414,36 @@ impl<'a, D> Iterator for SamplingIter<'a, D> {
 /// Created by [`Sampling::iter_mut`].
 pub struct SamplingIterMut<'a, D> {
     path: list::IterMut<'a, Point<D>>,
-    guess_len: usize,
 }
 
 impl<'a, D> Iterator for SamplingIterMut<'a, D> {
     type Item = &'a mut [f64; 2];
 
     fn next(&mut self) -> Option<Self::Item> {
-        match self.path.next() {
-            None => None,
-            Some(p) => {
-                self.guess_len -= 1;
-                Some(&mut p.xy)
-            }
-        }
+        self.path.next().map(|p| &mut p.xy)
     }
 
     fn size_hint(&self) -> (usize, Option<usize>) {
-        (0, Some(self.guess_len))
+        (self.path.len(), Some(self.path.len()))
     }
 }
 
 /// Iterator returning the curve points and owned data.
+///
+/// Created by [`Sampling::iter_data`].
 pub struct SamplingIntoIterData<D> {
     path: list::IntoIter<Point<D>>,
-    guess_len: usize,
 }
 
 impl<D> Iterator for SamplingIntoIterData<D> {
     type Item = ([f64; 2], D);
 
     fn next(&mut self) -> Option<Self::Item> {
-        match self.path.next() {
-            None => None,
-            Some(p) => {
-                self.guess_len -= 1;
-                Some((p.xy, p.data))
-            }
-        }
+         self.path.next().map(|p| (p.xy, p.data))
     }
 
     fn size_hint(&self) -> (usize, Option<usize>) {
-        (0, Some(self.guess_len))
+        (self.path.len(), Some(self.path.len()))
     }
 }
 
@@ -599,7 +576,6 @@ impl<D> Sampling<D> {
     #[must_use]
     pub fn clip(self, bb: BoundingBox) -> Sampling<Option<D>> {
         let mut path = Vec::new();
-        let mut new_len: usize = 0;
         // First point of the current segment, if any.
         let mut p0_opt: Option<Coord> = None;
         let mut p0_inside = false;
@@ -621,26 +597,21 @@ impl<D> Sampling<D> {
                             // p0 is already in `s`.
                             if p1_inside {
                                 path.push(p1.opt());
-                                new_len += 2;
                                 prev_cut = false;
                             } else if
                                 let Some(p) = Self::intersect(p0, p1.coord(), bb) {
                                     let t = p.t;
                                     path.push(p);
                                     path.push(Point::cut(t, None));
-                                    new_len += 3;
                                 } else {
                                     let c = Point::cut(p0.t, None);
                                     path.push(c);
-                                    new_len += 2;
                                 }
                         } else if p1_inside { // p0 ∉ bb, p1 ∈ bb
                             if let Some(p) = Self::intersect(p1.coord(), p0, bb) {
                                 path.push(p); // p ≠ p1
-                                new_len += 1;
                             }
                             path.push(p1.opt());
-                             new_len += 1;
                             prev_cut = false;
                         } else { // p0, p1 ∉ bb but maybe intersection
                             match Self::intersect_seg(p0, p1.coord(), bb) {
@@ -649,13 +620,11 @@ impl<D> Sampling<D> {
                                     path.push(q0);
                                     path.push(q1);
                                     path.push(Point::cut(t1, None));
-                                    new_len += 3;
                                 }
                                 Intersection::Pt(p) => {
                                     let t = p.t;
                                     path.push(p);
                                     path.push(Point::cut(t, None));
-                                    new_len += 2;
                                 }
                                 Intersection::Empty => (),
                             }
@@ -674,7 +643,6 @@ impl<D> Sampling<D> {
                         if p0_inside {
                             // `p0` is already in the `s.path`.
                             path.push(Point::cut(p0.t, None));
-                            new_len += 2;
                         }
                         p0_opt = None;
                     }
@@ -691,29 +659,25 @@ impl<D> Sampling<D> {
                     p0_inside = bb.contains(&p1); // update for next step
                     if p0_inside { // p0, p1 ∈ bb
                         path.push(p1.opt());
-                        new_len += 1;
                     } else { // p0 ∈ bb, p1 ∉ bb
                         if let Some(p) = Self::intersect(p0, p1.coord(), bb) {
                             let t = p.t;
                             path.push(p);
                             path.push(Point::cut(t, None));
-                            new_len += 2;
                         } else {
                             path.push(Point::cut(p0.t, None));
-                            new_len += 1;
                         }
                         prev_cut = true;
                     }
                 } else { // p1 is invalid (i.e., represent a cut)
                     p0_opt = None;
                     path.push(p1.opt());
-                    new_len += 1;
                     prev_cut = true
                 }
             }
         }
         if prev_cut { path.pop(); }
-        let mut s = Sampling::from_list(path.into(), new_len);
+        let mut s = Sampling::from_list(path.into());
         s.set_vp(bb);
         s
     }
@@ -724,7 +688,6 @@ impl<D> Sampling<D> {
     where P: IntoIterator<Item = Point<D>> {
         let mut s = Sampling::empty();
         let mut points = points.into_iter();
-        let mut len: usize = 0;
         macro_rules! skip_until_last_cut { () => {
             let mut cut = None;
             let mut first_pt = None;
@@ -734,17 +697,14 @@ impl<D> Sampling<D> {
             }
             match (cut, first_pt) {
                 (_, None) => {
-                    s.guess_len.set(len);
                     return s
                 }
                 (None, Some(p)) => {
                     s.path.push_back(p);
-                    len += 1;
                 }
                 (Some(c), Some(p)) => {
                     s.path.push_back(Point::cut(c.t, c.data));
                     s.path.push_back(p);
-                    len += 2;
                 }
             }
         }}
@@ -752,14 +712,11 @@ impl<D> Sampling<D> {
         while let Some(p) = points.next() {
             if p.is_valid() {
                 s.path.push_back(p);
-                len += 1;
             } else {
                 s.path.push_back(Point::cut(p.t, p.data));
-                len += 1;
                 skip_until_last_cut!();
             }
         }
-        s.guess_len.set(len);
         s
     }
 
@@ -1234,7 +1191,6 @@ fn refine_gen<D>(
     let len = match s.lengths() {
         Some(lengths) => lengths,
         None => return };
-    s.guess_len.set(s.guess_len.get() + n);
     macro_rules! r { ($x: ident) => { unsafe { s.path.get(&$x) } } }
     macro_rules! m { ($x: ident) => { unsafe { s.path.get_mut(&$x) } } }
     macro_rules! prev { ($x: ident) => { unsafe { s.path.prev(& $x) } } }
@@ -1916,6 +1872,8 @@ mod tests {
         let expected = vec![
             ([0.,0.], &0), ([1.,1.], &1), ([2.,2.], &2), ([3., 0.], &-1),
             ([4.,4.], &4)];
+        let (_, size_hint) = s.iter_data().size_hint();
+        assert_eq!(size_hint, Some(expected.len()));
         for (i, d) in s.iter_data().enumerate() {
             assert_eq!(d, expected[i]);
         }
@@ -1928,6 +1886,8 @@ mod tests {
         let expected = vec![
             ([0.,0.], 0), ([1.,1.], 1), ([2.,2.], 2), ([3., 0.], -1),
             ([4.,4.], 4)];
+        let (_, size_hint) = s.iter_data().size_hint();
+        assert_eq!(size_hint, Some(expected.len()));
         for (i, d) in s.into_iter_data().enumerate() {
             assert_eq!(d, expected[i]);
         }
