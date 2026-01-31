@@ -1,6 +1,10 @@
 doc:
 	cargo doc --all-features
 
+check:
+	cargo semver-checks
+	cargo deny check
+
 clip:
 	cargo run --example clip
 	cp examples/clip.tex /tmp
@@ -20,4 +24,4 @@ miri:
 	cargo miri test
 
 
-.PHONY: doc clip latex horror miri
+.PHONY: doc check clip latex horror miri
