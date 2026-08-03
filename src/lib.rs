@@ -261,18 +261,11 @@ impl<D> Sampling<D> {
         if self.is_empty() { return None }
         let p0 = self.path.first().unwrap();
         let p1 = self.path.last().unwrap();
-        let len_x;
-        let len_y;
-        match self.vp {
-            Some(vp) => {
-                len_x = vp.xmax - vp.xmin;
-                len_y = vp.ymax - vp.ymin;
-            }
-            None => {
-                len_x = 1.;
-                len_y = 1.;
-            }
-        }
+        let (len_x, len_y) = match self.vp {
+            Some(vp) => (vp.xmax - vp.xmin, vp.ymax - vp.ymin),
+            None => (1., 1.),
+
+        };
         Some(Lengths { t: (p1.t - p0.t).abs(), x: len_x, y: len_y })
     }
 
@@ -522,28 +515,21 @@ impl<D> Sampling<D> {
         let mut t0 = 0.; // t0 ∈ [0, 1]
         let mut t1 = 1.; // t1 ∈ [0, 1]
         let dx = x1 - x0; // may be 0.
-        let r0;
-        let r1; // r0 ≤ r1 or NAN if on x-boundary lines.
-        if dx >= 0. {
-            r0 = (bb.xmin - x0) / dx;
-            r1 = (bb.xmax - x0) / dx;
+        // r0 ≤ r1 or NAN if on x-boundary lines.
+        let (r0, r1) = if dx >= 0. {
+            ((bb.xmin - x0) / dx, (bb.xmax - x0) / dx)
         } else {
-            r0 = (bb.xmax - x0) / dx;
-            r1 = (bb.xmin - x0) / dx;
-        }
+            ((bb.xmax - x0) / dx, (bb.xmin - x0) / dx)
+        };
         if r0 > 1. || r1 < 0. { return Intersection::Empty }
         if r0 > 0. { t0 = r0 } // if r0 is NAN, keep the whole segment
         if r1 < 1. { t1 = r1 }
         let dy = y1 - y0; // may be 0.
-        let r0;
-        let r1;
-        if dy >= 0. {
-            r0 = (bb.ymin - y0) / dy;
-            r1 = (bb.ymax - y0) / dy;
+        let (r0, r1) = if dy >= 0. {
+            ((bb.ymin - y0) / dy, (bb.ymax - y0) / dy)
         } else {
-            r0 = (bb.ymax - y0) / dy;
-            r1 = (bb.ymin - y0) / dy;
-        }
+            ((bb.ymax - y0) / dy, (bb.ymin - y0) / dy)
+        };
         if r0 > t1 || r1 < t0 { return Intersection::Empty }
         if r0 > t0 { t0 = r0 }
         if r1 < t1 { t1 = r1 }
