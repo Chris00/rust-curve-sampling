@@ -1697,17 +1697,17 @@ impl<'a, D> LaTeX<'a, D> {
                 n += 1;
                 if new_path {
                     writeln!(f, "\\pgfpathmoveto{{\\pgfpointxy\
-                                 {{{:.16}}}{{{:.16}}}}}", x, y)?
+                                 {{{x}}}{{{y}}}}}")?
                 } else if n >= self.n {
                     write!(f, "\\pgfpathlineto{{\\pgfpointxy\
-                               {{{:.16}}}{{{:.16}}}}}\n\
+                               {{{x}}}{{{y}}}}}\n\
                                \\pgfusepath{{stroke}}\n\
                                \\pgfpathmoveto{{\\pgfpointxy\
-                               {{{:.16}}}{{{:.16}}}}}\n", x, y, x, y)?;
+                               {{{x}}}{{{y}}}}}\n")?;
                     n = 0;
                 } else {
                     writeln!(f, "\\pgfpathlineto{{\\pgfpointxy\
-                                 {{{:.16}}}{{{:.16}}}}}", x, y)?
+                                 {{{x}}}{{{y}}}}}")?
                 }
                 new_path = false;
             }
@@ -1757,50 +1757,48 @@ impl<'a, D> LaTeX<'a, D> {
                         // extremely expensive.  Just draw the current segment.
                         let pct = rem_len / l;
                         if pct <= 1e-14 {
-                            write!(f, "\\pgfsetarrowsstart{{{}}}\n\
+                            write!(f, "\\pgfsetarrowsstart{{{arrow}}}\n\
                                        \\pgfpathmoveto{{\\pgfpointxy
-                                       {{{:.16}}}{{{:.16}}}}}\n\
+                                       {{{x0}}}{{{y0}}}}}\n\
                                        \\pgfpathlineto{{\\pgfpointxy\
-                                       {{{:.16}}}{{{:.16}}}}}\n\
+                                       {{{x}}}{{{y}}}}}\n\
                                        \\pgfusepath{{stroke}}\n\
                                        \\pgfsetarrowsend{{}}\n\
                                        \\pgfpathmoveto{{\\pgfpointxy\
-                                       {{{:.16}}}{{{:.16}}}}}\n",
-                                   arrow, x0, y0, x, y, x, y)?;
+                                       {{{x}}}{{{y}}}}}\n")?;
                         } else {
                             let xm = x0 + pct * dx;
                             let ym = y0 + pct * dy;
-                            write!(f, "\\pgfsetarrowsend{{{}}}\n\
+                            write!(f, "\\pgfsetarrowsend{{{arrow}}}\n\
                                        \\pgfpathmoveto{{\\pgfpointxy\
-                                       {{{:.16}}}{{{:.16}}}}}\n\
+                                       {{{x0}}}{{{y0}}}}}\n\
                                        \\pgfpathlineto{{\\pgfpointxy\
-                                       {{{:.16}}}{{{:.16}}}}}\n\
+                                       {{{xm}}}{{{ym}}}}}\n\
                                        \\pgfusepath{{stroke}}\n\
                                        \\pgfsetarrowsend{{}}\n\
                                        \\pgfpathmoveto{{\\pgfpointxy\
-                                       {{{:.16}}}{{{:.16}}}}}\n\
+                                       {{{xm}}}{{{ym}}}}}\n\
                                        \\pgfpathlineto{{\\pgfpointxy\
-                                       {{{:.16}}}{{{:.16}}}}}\n",
-                                   arrow, x0, y0, xm, ym, xm, ym, x, y)?;
+                                       {{{x}}}{{{y}}}}}\n")?;
                             n = 2;
                         }
                         rem_len = f64::INFINITY; // No more arrow for this sub-path
                     } else if n >= self.n {
                         write!(f, "\\pgfpathlineto{{\\pgfpointxy\
-                                   {{{:.16}}}{{{:.16}}}}}\n\
+                                   {{{x}}}{{{y}}}}}\n\
                                    \\pgfusepath{{stroke}}\n\
                                    \\pgfpathmoveto{{\\pgfpointxy\
-                                   {{{:.16}}}{{{:.16}}}}}\n", x, y, x, y)?;
+                                   {{{x}}}{{{y}}}}}\n")?;
                         n = 0;
                     } else {
                         writeln!(f, "\\pgfpathlineto{{\\pgfpointxy\
-                                     {{{:.16}}}{{{:.16}}}}}", x, y)?
+                                     {{{x}}}{{{y}}}}}")?
                     }
                     rem_len -= l;
                 } else {
                     // No previous point.  New sub-path.
                     writeln!(f, "\\pgfpathmoveto{{\\pgfpointxy\
-                                 {{{:.16}}}{{{:.16}}}}}", x, y)?
+                                 {{{x}}}{{{y}}}}}")?
                 }
                 prev_pt = Some(p);
             }
@@ -1814,9 +1812,8 @@ impl<'a, D> LaTeX<'a, D> {
         writeln!(f, "\\begin{{pgfscope}}")?;
         if let Some(RGB8 {r, g, b}) = self.color {
             write!(f, "\\definecolor{{RustCurveSamplingColor}}{{RGB}}\
-                       {{{},{},{}}}\n\
-                       \\pgfsetstrokecolor{{RustCurveSamplingColor}}\n",
-                   r, g, b)?
+                       {{{r},{g},{b}}}\n\
+                       \\pgfsetstrokecolor{{RustCurveSamplingColor}}\n")?
         }
         match (self.arrow, self.arrow_pos) {
             (None, None) => self.write_with_lines(f)?,
@@ -1845,7 +1842,7 @@ impl<D> Sampling<D> {
             if x.is_nan() {
                 writeln!(f)?
             } else {
-                writeln!(f, "{:e} {:e}", x, y)?
+                writeln!(f, "{x:e} {y:e}")?
             }
         }
         Ok(())
@@ -1862,7 +1859,7 @@ impl<D> Display for Sampling<D> {
             if x.is_nan() {
                 writeln!(f)?
             } else {
-                writeln!(f, "{:e} {:e}", x, y)?
+                writeln!(f, "{x:e} {y:e}")?
             }
         }
         Ok(())
@@ -2206,7 +2203,7 @@ mod tests {
         write!(fh, "set terminal pdfcairo\n\
                     set output \"horror.pdf\"\n\
                     set grid\n\
-                    {}\n", s)?;
+                    {s}\n")?;
         Ok(())
     }
 
