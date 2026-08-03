@@ -19,6 +19,7 @@
 
 use std::{
     cell::RefCell,
+    cmp::Ordering,
     fmt::{self, Display, Formatter},
     io::{self, Write},
     marker::PhantomData,
@@ -152,6 +153,14 @@ impl<D> Point<D> {
     #[inline]
     fn is_valid(&self) -> bool {
         self.xy.iter().all(|z| z.is_finite())
+    }
+
+    fn cmp_t_incr(p1: &Self, p2: &Self) -> Ordering {
+        p1.t.total_cmp(&p2.t)
+    }
+
+    fn cmp_t_decr(p1: &Self, p2: &Self) -> Ordering {
+        p1.t.total_cmp(&p2.t).reverse()
     }
 
     /// Transform the data as optional.
@@ -669,8 +678,12 @@ impl<D> Sampling<D> {
         s
     }
 
-    /// Create a sampling from an iterator of points.  Beware that the
-    /// invariant "`p.y` is finite ⇒ `p.x` is finite" is not checked.
+    /// Create a sampling from an iterator of points.
+    ///
+    /// # Preconditions
+    /// - It is assumed that the `Point.t` field is sorted in increasing
+    ///   or decreasing order.
+    /// - The invariant "`p.y` is finite ⇒ `p.x` is finite" is assumed.
     fn from_point_iterator<P>(points: P) -> Self
     where P: IntoIterator<Item = Point<D>> {
         let mut s = Sampling::empty();
@@ -706,24 +719,7 @@ impl<D> Sampling<D> {
         }
         s
     }
-
-    /// Create a sampling from `points` after sorting them by
-    /// increasing (if `incr`) or decreasing (if `! incr`) values of
-    /// the field `t`.  Beware that the invariant "`p.y` is finite ⇒
-    /// `p.x` is finite" is not checked.
-    fn from_vec(mut points: Vec<Point<D>>, incr: bool) -> Self {
-        if incr {
-            points.sort_unstable_by(|p1, p2| {
-                // We know that `t1` and `t2` are finite.
-                p1.t.partial_cmp(&p2.t).unwrap() });
-        } else {
-            points.sort_unstable_by(|p1, p2| {
-                p2.t.partial_cmp(&p1.t).unwrap() });
-        }
-        Self::from_point_iterator(points)
-    }
 }
-
 
 impl<D, Y> FromIterator<Y> for Sampling<D>
 where Y: Img<D> {
@@ -741,6 +737,63 @@ where Y: Img<D> {
                 } else {
                     Point::cut(t, p.data)
                 } }))
+    }
+}
+
+struct MergeSortedIterator<I1, I2, CMP>
+where I1: Iterator,
+      I2: Iterator,
+{
+    i1: std::iter::Peekable<I1>,
+    i2: std::iter::Peekable<I2>,
+    cmp: CMP,
+}
+
+impl<I1, I2, CMP> MergeSortedIterator<I1, I2, CMP>
+where I1: Iterator,
+      I2: Iterator,
+      CMP: Fn(&I1::Item, &I2::Item) -> Ordering,
+{
+    /// Create a new iterator returning the values of `i1` and `i2` in
+    /// the order given by `cmp`.
+    ///
+    /// # Precondition
+    /// The iterators `i1` and `i2` are assumed to be sorted, both
+    /// with the order `cmp`.
+    fn new(i1: I1, i2: I2, cmp: CMP) -> Self {
+        Self {
+            i1: i1.peekable(),
+            i2: i2.peekable(),
+            cmp,
+        }
+    }
+}
+
+impl<I1, I2, CMP> Iterator for MergeSortedIterator<I1, I2, CMP>
+where I1: Iterator,
+      I2: Iterator<Item = I1::Item>,
+      CMP: Fn(&I1::Item, &I1::Item) -> Ordering,
+{
+    type Item = I1::Item;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        if let Some(p1) = self.i1.peek() {
+            if let Some(p2) = self.i2.peek() {
+                match (self.cmp)(p1, p2) {
+                    Ordering::Less => self.i1.next(),
+                    Ordering::Greater => self.i2.next(),
+                    Ordering::Equal => {
+                        // For a given time, the data should be equal.
+                        drop(self.i2.next());
+                        self.i1.next()
+                    },
+                }
+            } else {
+                self.i1.next()
+            }
+        } else {
+            self.i2.next()
+        }
     }
 }
 
@@ -948,14 +1001,22 @@ macro_rules! new_sampling_fn {
             }
 
             /// Evaluate the function at all initial values that where
-            /// provided through [`Self::init`].
-            fn eval_init(&mut self) {
+            /// provided through [`Self::init`] and add the results to
+            /// [`self.init_pt`].  Moreover sort all points by
+            /// increasing or decreasing order of `Point`s `t`
+            /// according to the order of `self.a` and `self.b`.
+            fn eval_init_and_sort(&mut self) {
+                self.init_pt.reserve(self.init.len());
                 // `t` ∈ \[`a`, `b`\] already checked by [`init`] and
                 // [`init_pt`].
                 for &t in &self.init {
                     self.init_pt.push((self.f)(t).into_point(t))
                 }
-                self.init.clear()
+                if self.a <= self.b {
+                    self.init_pt.sort_unstable_by(Point::cmp_t_incr);
+                } else {
+                    self.init_pt.sort_unstable_by(Point::cmp_t_decr);
+                }
             }
         }
     }
@@ -1002,17 +1063,22 @@ where F: FnMut(f64) -> Y,
                 return Sampling::empty()
             }
         }
-        self.eval_init();
-        // FIXME: why don't we push the points directly to the
-        // sampling?  This requires to sort self.init_pt and to insert
-        // them at the right locations while performing the uniform sampling.
-        let mut points = self.init_pt;
+        self.eval_init_and_sort();
         let dt = (self.b - self.a) / (self.n - 1) as f64;
-        for i in 0 .. self.n {
+        let uniform = (0 .. self.n).into_iter().map(|i| {
             let t = self.a + i as f64 * dt;
-            points.push((self.f)(t).into_point(t));
-        }
-        Sampling::from_vec(points, self.a < self.b)
+            (self.f)(t).into_point(t)
+        });
+        let cmp = if self.a <= self.b {
+            Point::cmp_t_incr
+        } else {
+            Point::cmp_t_decr
+        };
+        let points = MergeSortedIterator::new(
+            self.init_pt.into_iter(),
+            uniform,
+            cmp);
+        Sampling::from_point_iterator(points)
     }
 }
 
@@ -1351,39 +1417,69 @@ fn refine_gen<D>(
     }
 }
 
-fn push_almost_uniform_sampling<D>(
-    points: &mut Vec<Point<D>>,
-    f: &mut impl FnMut(f64) -> Point<D>,
+struct AlmostUniformSampling<D, F>
+where F: FnMut(f64) -> Point<D> {
+    f: F,
+    a: f64,
+    b: f64,
+    n: usize,
+    i: usize,
+    dt: f64,
+    random: u32,
+}
+
+/// Return an iterator that yields evaluations of `f` at `n` almost
+/// equispaced values in the interval \[`a`, `b`\].
+fn almost_uniform_sampling<D, F: FnMut(f64) -> Point<D>>(
+    f: F,
     a: f64, b: f64, n: usize
-) {
+) -> AlmostUniformSampling<D, F> {
     debug_assert!(n >= 4);
     let dt = (b - a) / (n - 3) as f64;
-    // Pseudorandom number generator from the "Xorshift RNGs" paper by
-    // George Marsaglia.
-    // See https://matklad.github.io/2023/01/04/on-random-numbers.html and
-    // https://github.com/rust-lang/rust/blob/1.55.0/library/core/src/slice/sort.rs#L559-L573
-    let mut random = (n as u32).wrapping_mul(1_000_000);
-    const NORMALIZE_01: f64 = 1. / u32::MAX as f64;
-    let mut rand = move || {
-        random ^= random << 13;
-        random ^= random >> 17;
-        random ^= random << 5;
-        random as f64 * NORMALIZE_01
-    };
-    points.push(f(a));
-    points.push(f(a + 0.0625 * dt));
-    for i in 1 ..= n - 4 {
-        let j = i as f64 + rand() * 0.125 - 0.0625;
-        points.push(f(a + j * dt));
+    let random = (n as u32).wrapping_mul(1_000_000);
+    AlmostUniformSampling { f, a, b, n, i: 0, dt, random }
+}
+
+impl<D, F: FnMut(f64) -> Point<D>> Iterator for AlmostUniformSampling<D, F> {
+    type Item = Point<D>;
+
+    fn next(&mut self) -> Option<Point<D>> {
+        const NORMALIZE_01: f64 = 1. / u32::MAX as f64;
+
+        if self.i >= self.n { return None }
+        let f = &mut self.f;
+        let v =
+            if self.i == 0 { f(self.a) }
+            else if self.i == 1 { f(self.a + 0.0625 * self.dt) }
+            else if self.i == self.n - 2 { f(self.b - 0.0625 * self.dt) }
+            else if self.i == self.n - 1 { f(self.b) }
+            else { // i ∈ {2,...,n-3}
+                // Pseudorandom number generator from the "Xorshift
+                // RNGs" paper by George Marsaglia.  See
+                // https://matklad.github.io/2023/01/04/on-random-numbers.html
+                // and
+                // https://github.com/rust-lang/rust/blob/1.55.0/library/core/src/slice/sort.rs#L559-L573
+                self.random ^= self.random << 13;
+                self.random ^= self.random >> 17;
+                self.random ^= self.random << 5;
+                let rand = self.random as f64 * NORMALIZE_01;
+                let j = (self.i - 1) as f64 + rand * 0.125 - 0.0625;
+                f(self.a + j * self.dt)
+            };
+        self.i += 1;
+        Some(v)
     }
-    points.push(f(b - 0.0625 * dt));
-    points.push(f(b));
 }
 
 impl<D> Sampling<D> {
     /// Return a sampling from the initial list of `points`.
+    ///
+    /// # Preconditions
+    /// - All `points` are in \[`a`, `b`\].
+    /// - `points` is sorted in increasing order (if `a` ≤ `b`) or
+    ///   decreasing otherwise.
     fn build(
-        mut points: Vec<Point<D>>,
+        points: Vec<Point<D>>,
         mut f: impl FnMut(f64) -> Point<D>,
         a: f64, b: f64, n: usize,
         viewport: Option<BoundingBox>
@@ -1399,9 +1495,12 @@ impl<D> Sampling<D> {
         // Uniform sampling requires ≥ 4 points but actually makes no
         // sense with less than 10 points.
         let n0 = (n / 10).max(10);
-        // FIXME: Why don't we push the points directly to the sampling?
-        push_almost_uniform_sampling(&mut points, &mut f, a, b, n0);
-        let mut s = Sampling::from_vec(points, a < b);
+        let uniform = almost_uniform_sampling(&mut f, a, b, n0);
+        let points = MergeSortedIterator::new(
+            points.into_iter(),
+            uniform,
+            if a <= b { Point::cmp_t_incr } else { Point::cmp_t_decr });
+        let mut s = Sampling::from_point_iterator(points);
         match viewport {
             Some(vp) => {
                 let in_vp = |p: &Point<_>| vp.contains(p);
@@ -1487,7 +1586,7 @@ where F: FnMut(f64) -> Y,
       Y: Img<D> {
     /// Return the sampling.
     pub fn build(mut self) -> Sampling<D> {
-        self.eval_init();
+        self.eval_init_and_sort();
         Sampling::build(
             self.init_pt,
             |x| (self.f)(x).into_point(x),
@@ -1524,7 +1623,7 @@ where F: FnMut(f64) -> Y,
       Y: Img<D> {
     /// Return the sampling.
     pub fn build(mut self) -> Sampling<D> {
-        self.eval_init();
+        self.eval_init_and_sort();
         Sampling::build(
             self.init_pt,
             |t| (self.f)(t).into_point(t),
@@ -1793,7 +1892,15 @@ mod tests {
     use std::{error::Error,
               fs::File,
               io::Write, path::Path};
-    use crate::{BoundingBox, Data, NoData, Point, Sampling};
+    use crate::{BoundingBox, Data, MergeSortedIterator, NoData, Point, Sampling};
+
+    #[test]
+    fn merge_sorted_iterator() {
+        let i1 = [1, 3, 5, 7].into_iter();
+        let i2 = [1, 2, 5, 8].into_iter();
+        let i = MergeSortedIterator::new(i1, i2, |i1, i2| i1.cmp(i2));
+        assert_eq!(i.collect::<Vec<_>>(), [1, 2, 3, 5, 7, 8])
+    }
 
     type R<T> = Result<T, Box<dyn Error>>;
 
