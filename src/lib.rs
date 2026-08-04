@@ -2198,9 +2198,9 @@ mod tests {
                 |x| 1. + x * x + 0.0125 * (1. - 3. * (x - 1.)).abs().ln(),
                 "1 + x² + 0.0125 ln|1 - 3(x-1)|")?,
             p!(xmin: -2., xmax: 2., ymin: 0., ymax: 3., n: 300,
-               init:vec![4. / 3.]).plot(
-                |x| 1. + x * x + 0.0125 * (1. - 3. * (x - 1.)).abs().ln(),
-                "1 + x² + 0.0125 ln|1 - 3(x-1)| (specifying x:4/3")?,
+                init:vec![4. / 3.]).plot(
+                    |x| 1. + x * x + 0.0125 * (1. - 3. * (x - 1.)).abs().ln(),
+                   "1 + x² + 0.0125 ln|1 - 3(x-1)| (specifying x:4/3)")?,
             p!(xmin: -0.5, xmax: 0.5, ymin: -1., ymax: 1.).plot(
                 |x| x * (1. / x).sin(), "x sin(1/x)")?,
             p!(xmin: -0.5, xmax: 0.5, ymin: -1., ymax: 1., n:200).plot(
