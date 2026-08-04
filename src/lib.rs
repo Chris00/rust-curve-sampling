@@ -59,6 +59,14 @@ impl BoundingBox {
     }
 
     /// Return `true` if the bounding box has a non-empty interior.
+    ///
+    /// # Example
+    ///
+    /// ```
+    /// use curve_sampling::Sampling;
+    /// let s = Sampling::from_iter([0.]);
+    /// assert!(s.bounding_box().is_empty());
+    /// ```
     #[inline]
     pub fn is_empty(&self) -> bool {
         !(self.xmin < self.xmax && self.ymin < self.ymax) // NAN ⟹ empty
@@ -449,6 +457,21 @@ impl<D> Sampling<D> {
     /// Return the smallest rectangle enclosing all the points of the
     /// sampling `self`.  If the path is empty, the "min" fields of
     /// the bounding box are set to +∞ and "max" fields to -∞.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use curve_sampling::{Sampling, BoundingBox};
+    /// let s = Sampling::from_iter([3., 4.]);
+    /// let bb = BoundingBox { xmin: 0., xmax: 1., ymin: 3., ymax: 4. };
+    /// assert_eq!(s.bounding_box(), bb);
+    /// ```
+    ///
+    /// ```
+    /// use curve_sampling::Sampling;
+    /// let s = Sampling::from_iter([0.]);
+    /// assert!(s.bounding_box().is_empty());
+    /// ```
     pub fn bounding_box(&self) -> BoundingBox {
         let mut points = self.iter().skip_while(|[x,_]| x.is_nan());
         let mut bb = match &points.next() {
@@ -709,8 +732,10 @@ impl<D> Sampling<D> {
 
 impl<D, Y> FromIterator<Y> for Sampling<D>
 where Y: Img<D> {
-    /// Return an sampling from the points (possibly with data).
-    /// Points with non-finite coordinates are interpreted as cuts.
+    /// Return an sampling from the Y-values (possibly with data).
+    /// The X-values are the indices of the elements (see
+    /// [`Iterator::enumerate`]).  Points with non-finite coordinates
+    /// are interpreted as cuts.
     fn from_iter<P>(points: P) -> Self
     where P: IntoIterator<Item = Y> {
         Sampling::from_point_iterator(
@@ -1921,6 +1946,13 @@ mod tests {
             Point::new_unchecked(0., [1., 2.], NoData::new()));
         let bb = BoundingBox {xmin: 1., xmax: 1., ymin: 2., ymax: 2.};
         assert_eq!(s.bounding_box(), bb);
+    }
+
+        #[test]
+    fn singleton_has_empty_bounding_box() {
+        let s = Sampling::singleton(
+            Point::new_unchecked(0., [1., 2.], NoData::new()));
+        assert!(s.bounding_box().is_empty());
     }
 
     fn test_clip(bb: BoundingBox,
