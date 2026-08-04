@@ -1309,13 +1309,12 @@ fn refine_gen<D>(
                     let c1 = r!(p1).coord();
                     cost::set_middle(c0, m!(pm), c1, len);
                     let cm = r!(pm).coord();
-                    if let Some(p_1) = prev!(p0) {
-                        if r!(p_1).is_valid() {
-                            let c_1 = r!(p_1).coord();
-                            cost::set_middle(c_1, m!(p0), cm, len);
-                            let p_1 = r!(p_1);
-                            let p0 = r!(p0).coord();
-                            unsafe { update_segment(&mut s.pq, p_1, p0, len) }
+                    if let Some(p_1) = prev!(p0) && r!(p_1).is_valid() {
+                        let c_1 = r!(p_1).coord();
+                        cost::set_middle(c_1, m!(p0), cm, len);
+                        let p_1 = r!(p_1);
+                        let p0 = r!(p0).coord();
+                        unsafe { update_segment(&mut s.pq, p_1, p0, len) }
                     }
                     if let Some(p2) = next!(p1) && r!(p2).is_valid() {
                         let c2 = r!(p2).coord();
@@ -1336,7 +1335,6 @@ fn refine_gen<D>(
                         let p1 = r!(p1);
                         let p2 = r!(p2).coord();
                         unsafe { update_segment(&mut s.pq, p1, p2, len) }
-                    }
                     }
                 }
                 let vp = pm_in_vp || in_vp(r!(p0));
