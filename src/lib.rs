@@ -1416,11 +1416,14 @@ where F: FnMut(f64) -> Point<D> {
 
 /// Return an iterator that yields evaluations of `f` at `n` almost
 /// equispaced values in the interval \[`a`, `b`\].
+///
+/// Remark: The randomization seed only depends on the parameter `n`
+/// for simple reproducibility.
 fn almost_uniform_sampling<D, F: FnMut(f64) -> Point<D>>(
     f: F,
     a: f64, b: f64, n: usize
 ) -> AlmostUniformSampling<D, F> {
-    debug_assert!(n >= 4);
+    let n = n.max(4);
     let dt = (b - a) / (n - 3) as f64;
     let random = (n as u32).wrapping_mul(1_000_000);
     AlmostUniformSampling { f, a, b, n, i: 0, dt, random }
@@ -2206,6 +2209,4 @@ mod tests {
                     {s}\n")?;
         Ok(())
     }
-
-
 }
