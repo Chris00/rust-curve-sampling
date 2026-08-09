@@ -1,12 +1,11 @@
 use std::{error::Error,
           fs::File,
-          f64::NAN,
           io::Write,
           process::Command};
 use curve_sampling::Sampling;
 
 fn main() -> Result<(), Box<dyn Error>> {
-    let s = Sampling::from_iter([[0., 0.], [1., 1.], [NAN, NAN],
+    let s = Sampling::from_iter([[0., 0.], [1., 1.], [f64::NAN, f64::NAN],
                                  [1., 1.], [3., -1.]]);
     s.latex().arrow_pos(0.3).write(&mut File::create("/tmp/arrow0.tex")?)?;
 

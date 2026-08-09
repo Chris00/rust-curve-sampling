@@ -14,7 +14,10 @@ struct NodeLoc {
     i: usize,
 }
 
+/// A witness of a queue entry to be able to update its priority.
 #[derive(Debug)]
+// This value cannot be cloned so only one instance may be created (no
+// need to update several witnesses when the priority is changed).
 pub struct Witness<T> {
     loc: Rc<Cell<NodeLoc>>,
     marker: PhantomData<T>,
@@ -117,23 +120,21 @@ impl<T> PQ<T> {
     }
 
     pub fn increase_priority(&mut self, w: &Witness<T>, priority: f64) {
-        let w_loc = w.loc.get();
-        let slot = w_loc.slot;
-        let i = w_loc.i;
+        let NodeLoc { slot, i } = w.loc.get();
         let new_slot = self.slot_of_priority(priority);
         // FIXME: Here we could also easily lower the priority.  Do we
         // want to do that?
         if new_slot <= slot { return }
         let p_slot = &mut self.p[slot];
-        let n;
-        if i + 1 == p_slot.len() {
-            n = p_slot.pop().unwrap();
+        let n = if i + 1 == p_slot.len() {
+            p_slot.pop().unwrap()
         } else {
             // Exchange with the last one and update the latter location.
-            n = p_slot.swap_remove(i);
+            let n = p_slot.swap_remove(i);
             let loc = p_slot[i].loc.get();
             p_slot[i].loc.set(NodeLoc { i, .. loc });
-        }
+            n
+        };
         let new_i = self.p[new_slot].len();
         n.loc.set(NodeLoc { slot: new_slot, i: new_i });
         self.p[new_slot].push(n);

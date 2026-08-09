@@ -1,12 +1,11 @@
 use std::{error::Error,
-          fs::File,
-          f64::NAN};
+          fs::File};
 use curve_sampling as cs;
 
 fn main() -> Result<(), Box<dyn Error>> {
     let s = cs::Sampling::from_iter(
         [[0., -0.5], [1.5, 1.], [0.2, 0.5], [0.3, 1.5], [1., 0.6],
-         [NAN, NAN], [-0.5, 0.5], [-1., 0.], [0.5, 0.5]]);
+         [f64::NAN, f64::NAN], [-0.5, 0.5], [-1., 0.], [0.5, 0.5]]);
     s.write(&mut File::create("/tmp/clip0.dat")?)?;
     s.latex().write(&mut File::create("/tmp/clip0.tex")?)?;
     let s1 = s.clip(cs::BoundingBox { xmin: 0., xmax: 1.,
