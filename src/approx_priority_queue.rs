@@ -80,7 +80,7 @@ impl<T> PQ<T> {
         }
     }
 
-    fn slot_of_priority(&self, priority: f64) -> usize {
+    fn slot_of_priority(priority: f64) -> usize {
         let priority = priority.clamp(0., PMAX);
         if priority <= PSMALL {
             if priority <= 0. { return 0 }
@@ -101,7 +101,7 @@ impl<T> PQ<T> {
     /// This is not enforced by the type system.
     pub fn push(&mut self, priority: f64, item: T) -> Witness<T> {
         debug_assert!(!priority.is_nan());
-        let slot= self.slot_of_priority(priority);
+        let slot= Self::slot_of_priority(priority);
         let p_slot = &mut self.p[slot];
         let i = p_slot.len();
         // Add a location (at a stable memory location).
@@ -121,7 +121,7 @@ impl<T> PQ<T> {
 
     pub fn increase_priority(&mut self, w: &Witness<T>, priority: f64) {
         let NodeLoc { slot, i } = w.loc.get();
-        let new_slot = self.slot_of_priority(priority);
+        let new_slot = Self::slot_of_priority(priority);
         // FIXME: Here we could also easily lower the priority.  Do we
         // want to do that?
         if new_slot <= slot { return }
