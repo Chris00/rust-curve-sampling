@@ -10,6 +10,7 @@ documentation = "https://docs.rs/curve-sampling"
 license = "GPL-3.0-or-later"
 keywords = ["math", "sampling", "graphing", "plotting"]
 categories = ["mathematics", "science"]
+rust-version = "1.99"
 
 exclude = [".github", "auto/",
   "src/list_id_arena.rs", "src/list_vec.rs",

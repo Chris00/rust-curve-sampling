@@ -91,8 +91,7 @@ impl<T> List<T> {
     /// enforced by the type system.
     pub fn push_back(&mut self, item: T) -> Witness<T> {
         let node = Node { item, prev: self.tail, next: None };
-        let node = unsafe { NonNull::new_unchecked(
-            Box::into_raw(Box::new(node))) };
+        let node = Box::into_non_null(Box::new(node));
         match self.tail {
             None => self.head = Some(node), // Was an empty list
             Some(mut node0) => unsafe {
@@ -167,9 +166,7 @@ impl<T> List<T> {
             prev: Some(w.node),
             next: unsafe { w.node.as_ref().next }
         };
-        let new = unsafe {
-            NonNull::new_unchecked(Box::into_raw(Box::new(new)))
-        };
+        let new = Box::into_non_null(Box::new(new));
         match unsafe { w.node.as_ref() }.next {
             None => self.tail = Some(new), // last node
             Some(mut next) => {
