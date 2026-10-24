@@ -56,13 +56,18 @@ const DP_SMALL: f64 = PSMALL / (NSMALL-1) as f64;
 const DP_LARGE: f64 = (PMAX - PSMALL) / NLARGE as f64;
 
 impl<T> PQ<T> {
-    /// Return an empty priority queue geared to handle `n` levels of
+    /// Return an empty priority queue geared to handle `N` levels of
     /// priorities in the range `0. .. 1.`.
     #[inline]
     pub fn new() -> Self {
         let mut p = Vec::with_capacity(N);
         for _ in 0 .. N { p.push(vec![]) }
         PQ { p, max_slot: 0 }
+    }
+
+    #[cfg(test)]
+    fn len(&self) -> usize {
+        self.p.iter().map(|pi| pi.len()).sum()
     }
 
     #[cfg(test)]
@@ -75,9 +80,10 @@ impl<T> PQ<T> {
     pub fn print_stats(&self) {
         for (i, pi) in self.p.iter().enumerate() {
             if !pi.is_empty() {
-                println!("{i:3} {}", pi.len());
+                println!("{i:3} {} (capacity: {})", pi.len(), pi.capacity());
             }
         }
+        println!("Number of elements: {}", self.len());
     }
 
     fn slot_of_priority(priority: f64) -> usize {
@@ -111,29 +117,34 @@ impl<T> PQ<T> {
         Witness { loc, marker: PhantomData }
     }
 
-    pub fn pop(&mut self) -> Option<T> {
-        let item = self.p[self.max_slot].pop();
+    /// Restore the invariant that `self.p[self.max_slot]` is nonempty
+    /// (or `max_slot == 0`) after a slot may have been emptied.
+    fn shrink_max_slot(&mut self) {
         while self.max_slot > 0 && self.p[self.max_slot].is_empty() {
             self.max_slot -= 1;
         }
+    }
+
+    pub fn pop(&mut self) -> Option<T> {
+        let item = self.p[self.max_slot].pop();
+        self.shrink_max_slot();
         item.map(|n| n.item)
     }
 
-    pub fn increase_priority(&mut self, w: &Witness<T>, priority: f64) {
+    pub fn update_priority(&mut self, w: &Witness<T>, priority: f64) {
         let NodeLoc { slot, i } = w.loc.get();
         let new_slot = Self::slot_of_priority(priority);
-        // FIXME: Here we could also easily lower the priority.  Do we
-        // want to do that?
-        if new_slot <= slot { return }
+        if new_slot == slot { return }
         let p_slot = &mut self.p[slot];
-        let n = if i + 1 == p_slot.len() {
-            p_slot.pop().unwrap()
+        let n;
+        if i + 1 == p_slot.len() {
+            n = p_slot.pop().unwrap();
+            self.shrink_max_slot();
         } else {
             // Exchange with the last one and update the latter location.
-            let n = p_slot.swap_remove(i);
+            n = p_slot.swap_remove(i);
             let loc = p_slot[i].loc.get();
             p_slot[i].loc.set(NodeLoc { i, .. loc });
-            n
         };
         let new_i = self.p[new_slot].len();
         n.loc.set(NodeLoc { slot: new_slot, i: new_i });
@@ -173,12 +184,12 @@ mod test {
     }
 
     #[test]
-    fn increase_priority_simple() {
+    fn update_priority_simple() {
         let mut q = PQ::new();
         q.push(0.1 * PMAX, "a");
         q.push(0.2 * PMAX, "b");
         let w = q.push(0., "c");
-        q.increase_priority(&w, 0.3 * PMAX);
+        q.update_priority(&w, 0.3 * PMAX);
         assert_eq!(q.pop(), Some("c"));
         assert_eq!(q.pop(), Some("b"));
         assert_eq!(q.pop(), Some("a"));
@@ -186,19 +197,40 @@ mod test {
     }
 
     #[test]
-    fn increase_priority() {
+    fn update_priority() {
         let mut q = PQ::new();
         q.push(0.4 * PMAX, "d");
         q.push(0.1 * PMAX, "a");
-        q.push(0.3 * PMAX, "c");
+        let c1 = q.push(0.3 * PMAX, "c1");
+        q.push(0.3 * PMAX, "c2");
         q.push(0.2 * PMAX, "b");
-        let w = q.push(0., "e");
+        let e = q.push(0., "e");
+        assert_eq!(q.len(), 6);
+        q.update_priority(&e, 0.25 * PMAX);
         assert_eq!(q.pop(), Some("d"));
-        q.increase_priority(&w, 0.25 * PMAX);
-        assert_eq!(q.pop(), Some("c"));
+        q.update_priority(&c1, 0.2 * PMAX);
+        assert_eq!(q.len(), 5);
+        assert_eq!(q.pop(), Some("c2"));
         assert_eq!(q.pop(), Some("e"));
+        assert_eq!(q.pop(), Some("c1"));
         assert_eq!(q.pop(), Some("b"));
         assert_eq!(q.pop(), Some("a"));
+        assert_eq!(q.pop(), None);
+    }
+
+    #[test]
+    fn lower_priority_from_lone_top_slot() {
+        // Regression test: `top` is the *only* item in the current
+        // max slot.  Lowering its priority must not leave `max_slot`
+        // stuck pointing at the now-empty slot, or `pop` will
+        // wrongly report the queue as exhausted while `a` (and
+        // `top` itself, once relocated) are still in it.
+        let mut q = PQ::new();
+        q.push(0.2 * PMAX, "a");
+        let top = q.push(0.4 * PMAX, "top");
+        q.update_priority(&top, 0.1 * PMAX);
+        assert_eq!(q.pop(), Some("a"));
+        assert_eq!(q.pop(), Some("top"));
         assert_eq!(q.pop(), None);
     }
 

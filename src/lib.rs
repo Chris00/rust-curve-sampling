@@ -1226,7 +1226,7 @@ unsafe fn update_segment<D>(
     match &*p0.witness.borrow() {
         Some(w) => {
             let priority = cost::segment(p0.coord(), p1, len);
-            pq.increase_priority(w, priority)
+            pq.update_priority(w, priority)
         }
         None => panic!("Sampling::update_segment: unset witness"),
     }
