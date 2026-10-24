@@ -157,7 +157,7 @@ impl<T> PQ<T> {
 
 #[cfg(test)]
 mod test {
-    use super::{PQ, PMAX};
+    use super::{PQ, PMAX, Witness};
 
     #[test]
     fn pair() {
@@ -269,5 +269,74 @@ mod test {
         let mut n = 0;
         while q.pop().is_some() { n += 1 }
         assert_eq!(n, n0)
+    }
+
+    /// Random sequences of `push`, `update_priority` (raising or
+    /// lowering) and `pop`, checked against a trivial model: every
+    /// `pop` must return an item of the highest occupied slot, `None`
+    /// only when the queue is really empty, and no item may be lost.
+    #[test]
+    fn random_ops_match_model() {
+        // xorshift64 pseudo-random generator (fixed seed).
+        let mut state: u64 = 0x9E37_79B9_7F4A_7C15;
+        let mut rnd = move || {
+            state ^= state << 13;
+            state ^= state >> 7;
+            state ^= state << 17;
+            state
+        };
+        // Mix of exact bounds, tiny and ordinary priorities so that
+        // both the "small" and "large" slot ranges are exercised.
+        let prio = |r: u64| -> f64 {
+            let u = (r >> 8) as f64 / u64::MAX as f64;
+            match r % 5 { 0 => 0., 1 => PMAX, 2 => u * 1e-3, _ => u * PMAX }
+        };
+        for round in 0 .. 300 {
+            let mut q: PQ<usize> = PQ::new();
+            // Indexed by item id.  `None` once the item has been popped.
+            let mut wit: Vec<Option<Witness<usize>>> = vec![];
+            let mut slot: Vec<Option<usize>> = vec![]; // model
+            let mut live = 0;
+            for _ in 0 .. 400 {
+                match rnd() % 4 {
+                    0 | 1 => {
+                        let id = wit.len();
+                        let p = prio(rnd());
+                        wit.push(Some(q.push(p, id)));
+                        slot.push(Some(PQ::<usize>::slot_of_priority(p)));
+                        live += 1;
+                    }
+                    2 if live > 0 => {
+                        let ids: Vec<_> = (0 .. slot.len())
+                            .filter(|&i| slot[i].is_some()).collect();
+                        let id = ids[rnd() as usize % ids.len()];
+                        let p = prio(rnd());
+                        q.update_priority(wit[id].as_ref().unwrap(), p);
+                        slot[id] = Some(PQ::<usize>::slot_of_priority(p));
+                    }
+                    _ => {
+                        let best = slot.iter().flatten().max().copied();
+                        match (q.pop(), best) {
+                            (None, None) => (),
+                            (Some(id), Some(b)) => {
+                                assert_eq!(slot[id], Some(b),
+                                    "round {round}: popped a non-maximal item");
+                                slot[id] = None;
+                                wit[id] = None;
+                                live -= 1;
+                            }
+                            (got, want) => panic!(
+                                "round {round}: pop() = {got:?} but the \
+                                 highest occupied slot is {want:?} \
+                                 ({live} items in the queue)"),
+                        }
+                    }
+                }
+                assert_eq!(q.len(), live, "round {round}: item count");
+            }
+            // Draining must return every remaining item.
+            while let Some(id) = q.pop() { slot[id] = None; live -= 1 }
+            assert_eq!(live, 0, "round {round}: items lost");
+        }
     }
 }
