@@ -37,23 +37,22 @@ pub struct PQ<T> {
     max_slot: usize,
 }
 
-// For these constants, see [`lib::cost::segment`].  They were also
-// determined by experimentation, see the `horror` test.
+// Priorities are clamped to `0. ..= PMAX`.  A segment whose cost has
+// been refined enough to be tiny must still be ordered correctly with
+// respect to its neighbors (costs decrease geometrically when a
+// segment is split), so priorities are mapped to slots on a
+// *logarithmic* scale: `SLOTS_PER_OCTAVE` consecutive slots for each
+// factor 2 of the priority.  A linear scale (even piecewise) puts all
+// small priorities in the same slot, in which case the queue
+// degenerates to a LIFO and the sampling stops being adaptive when
+// many evaluations are requested.  See [`lib::cost::segment`] and the
+// `horror` test.
 const PMAX: f64 = 1.;
-const PSMALL: f64 = 1e-3;
-const NSMALL: usize = 256;
-const NLARGE: usize = 128;
-const N: usize = NSMALL + NLARGE;
-
-/// Step size for priorities p ∈ [0, PSMALL].
-/// If the priority p is such that DP_SMALL · i < p ≤ DP_SMALL · (i+1)
-/// then is will be in slot i+1.
-const DP_SMALL: f64 = PSMALL / (NSMALL-1) as f64;
-/// Step size for priorities p ∈ ]PSMALL, 1.]
-/// If the priority p is such that
-/// PSMALL + DP_LARGE · i < p ≤ PSMALL + DP_LARGE · (i+1)
-/// then is will be in slot i.
-const DP_LARGE: f64 = (PMAX - PSMALL) / NLARGE as f64;
+const SLOTS_PER_OCTAVE: f64 = 8.;
+/// Number of slots.  Slot 0 is reserved for priorities ≤ 0.  The
+/// slots 1 ..= N-1 cover priorities from about `PMAX · 2^-(N-2)/8`
+/// (≈ 3.5e-15, smaller ones are put in slot 1) up to `PMAX`.
+const N: usize = 384;
 
 impl<T> PQ<T> {
     /// Return an empty priority queue geared to handle `N` levels of
@@ -88,14 +87,12 @@ impl<T> PQ<T> {
 
     fn slot_of_priority(priority: f64) -> usize {
         let priority = priority.clamp(0., PMAX);
-        if priority <= PSMALL {
-            if priority <= 0. { return 0 }
-            (priority / DP_SMALL).ceil() as usize
-        } else {
-            if priority >= PMAX { return N-1 }
-            let i = ((priority - PSMALL) / DP_LARGE).ceil() as usize - 1;
-            i + NSMALL
-        }
+        if priority <= 0. { return 0 }
+        // priority ∈ ]0, PMAX] ⟹ log2(priority / PMAX) ≤ 0.
+        let s = (N - 1) as f64
+            + ((priority / PMAX).log2() * SLOTS_PER_OCTAVE).floor();
+        // `as usize` saturates (to 0 for negative values).
+        (s as usize).clamp(1, N - 1)
     }
 
     /// Pushes `item` with `priority` to the queue and set a reference
@@ -232,6 +229,36 @@ mod test {
         assert_eq!(q.pop(), Some("a"));
         assert_eq!(q.pop(), Some("top"));
         assert_eq!(q.pop(), None);
+    }
+
+    #[test]
+    fn small_priorities_are_ordered() {
+        // Priorities spanning many orders of magnitude below 1 must be
+        // distinguished (they used to share a single slot, and thus
+        // came out in LIFO order).
+        let mut q = PQ::new();
+        q.push(1e-7 * PMAX, "high");
+        q.push(1e-9 * PMAX, "low");
+        q.push(1e-12 * PMAX, "lower");
+        assert_eq!(q.pop(), Some("high"));
+        assert_eq!(q.pop(), Some("low"));
+        assert_eq!(q.pop(), Some("lower"));
+        assert_eq!(q.pop(), None);
+    }
+
+    #[test]
+    fn slot_of_priority_monotone() {
+        let mut prev = PQ::<()>::slot_of_priority(0.);
+        assert_eq!(prev, 0);
+        let mut p = 1e-300;
+        while p < PMAX {
+            let s = PQ::<()>::slot_of_priority(p);
+            assert!(s >= prev && s >= 1 && s < super::N, "p = {p:e}");
+            prev = s;
+            p *= 1.01;
+        }
+        assert_eq!(PQ::<()>::slot_of_priority(PMAX), super::N - 1);
+        assert_eq!(PQ::<()>::slot_of_priority(5e5), super::N - 1);
     }
 
     #[test]
