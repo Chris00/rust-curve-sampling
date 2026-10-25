@@ -962,7 +962,10 @@ macro_rules! new_sampling_fn {
               Y: Img<D>,
         {
             /// Set the maximum number of evaluations of the function
-            /// to build the sampling.  Panic if `n < 2`.
+            /// to build the sampling.  Panic if `n < 2`.  An initial
+            /// exploration of the function always uses at least 10
+            /// evaluations so, for `n < 10`, this is the number of
+            /// evaluations performed.
             pub fn n(mut self, n: usize) -> Self {
                 if n < 2 {
                     panic!("curve_sampling: n = {} must at least be 2", n)
@@ -1505,7 +1508,9 @@ impl<D> Sampling<D> {
             }
         }
         // Uniform sampling requires ≥ 4 points but actually makes no
-        // sense with less than 10 points.
+        // sense with less than 10 points.  Thus, if `n < 10`, more
+        // than `n` evaluations are performed and no refinement is done
+        // (`n - n0` must not underflow).
         let n0 = (n / 10).max(10);
         let uniform = almost_uniform_sampling(&mut f, a, b, n0);
         let points = MergeSortedIterator::new(
@@ -1517,11 +1522,11 @@ impl<D> Sampling<D> {
             Some(vp) => {
                 let in_vp = |p: &Point<_>| vp.contains(p);
                 compute(&mut s, in_vp);
-                refine_gen(&mut s, n - n0, &mut f, in_vp)
+                refine_gen(&mut s, n.saturating_sub(n0), &mut f, in_vp)
             }
             None => {
                 compute(&mut s, |_| true);
-                refine_gen(&mut s, n - n0, &mut f, |_| true)
+                refine_gen(&mut s, n.saturating_sub(n0), &mut f, |_| true)
             }
         }
         s
@@ -2017,6 +2022,21 @@ mod tests {
         test_clip(bb,
                   vec![[0., 0.], [2., 2.]],
                   vec![Some((0., 0.)), Some((1., 1.))])
+    }
+
+    #[test]
+    fn small_n() {
+        // The initial exploration uses at least 10 points, even if
+        // fewer evaluations were requested.  The number of refinement
+        // steps `n - n0` used to underflow in that case: a panic in
+        // debug mode, an endless loop in release mode.
+        for n in 2 ..= 12 {
+            let mut evals = 0;
+            let s = Sampling::fun(|x: f64| { evals += 1; x.sin() }, 0., 3.)
+                .n(n).build();
+            assert_eq!(evals, n.max(10), "n = {n}");
+            assert_eq!(s.len(), evals);
+        }
     }
 
     #[test]
